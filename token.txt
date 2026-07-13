@@ -1,0 +1,10 @@
+{
+  "app_id": "7PQ7FSIXHF-100",
+  "secret_key": "3GUS0RAA0H",
+  "redirect_uri": "http://127.0.0.1:3000",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiZDoxIiwiZDoyIiwieDowIiwieDoxIiwieDoyIl0sImF0X2hhc2giOiJnQUFBQUFCcU0wbGVZVXZQR3RDdGxMRHUzU3hhQ3NLLWZPRUhlVllyNU8wQjE5SXZMenlaSkdWa3VkTHpQSDJBU0pQbUZJWjdTRl9uV0g2QUlILTJydGtQTi16OG11YTJhZFRiUVVNSTA5TEVweURBV1ZsOV9mbz0iLCJkaXNwbGF5X25hbWUiOiIiLCJvbXMiOiJLMSIsImhzbV9rZXkiOiJiOGEzMDI4MmRhZWY0MjViMjZhZTEyZTYzZGM3NzhjODhhZWU4N2Q4NDU5ZjNlYmQ3MTZiNjA0OCIsImlzRGRwaUVuYWJsZWQiOiJOIiwiaXNNdGZFbmFibGVkIjoiTiIsImZ5X2lkIjoiRkFKNjI0NTMiLCJhcHBUeXBlIjoxMDAsImV4cCI6MTc4MTgyOTAwMCwiaWF0IjoxNzgxNzQ2MDE0LCJpc3MiOiJhcGkuZnllcnMuaW4iLCJuYmYiOjE3ODE3NDYwMTQsInN1YiI6ImFjY2Vzc190b2tlbiJ9.Brern9naQglEODNp67WzJFSfgMKMuKxzvu-m8H-2wKo"
+  "access_token": ""
+}
+
+
+https://api-t1.fyers.in/api/v3/generate-authcode?client_id=7PQ7FSIXHF-100&redirect_uri=http://127.0.0.1:3000&response_type=code&state=sample_state

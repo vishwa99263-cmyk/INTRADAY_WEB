@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: market_timescaledb
+    restart: always
+    environment:
+      POSTGRES_DB: market_intelligence
+      POSTGRES_USER: market_analyst
+      POSTGRES_PASSWORD: SecretMarketPassword2026
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: '1gb'
+    command: ["postgres", "-c", "shared_buffers=1024MB", "-c", "work_mem=64MB", "-c", "maintenance_work_mem=256MB", "-c", "max_worker_processes=8"]
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: market_pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@marketintel.com
+      PGADMIN_DEFAULT_PASSWORD: PgAdminSecretPassword2026
+    ports:
+      - "8080:80"
+    depends_on:
+      - timescaledb
+
+volumes:
+  pgdata:
