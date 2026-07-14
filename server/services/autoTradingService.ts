@@ -2032,7 +2032,8 @@ export async function runServerSideAutoTrading(
         break positionalBlock;
       }
 
-      const positionalConfOk = antigravity.confidence >= 65; // IQ 200: 65% is enough if trend is strong
+      const positionalConfThreshold = consensus.isPromoted ? 50 : 35; // IQ 200: relaxed to 50 for real, 35 for sandbox shadow to gather training data
+      const positionalConfOk = antigravity.confidence >= positionalConfThreshold;
       
       const overallTrend = report.trend.overall.toUpperCase();
       const isBullTrend = overallTrend.includes("BULLISH");
@@ -2048,7 +2049,7 @@ export async function runServerSideAutoTrading(
       if (!positionalConfOk || !trendAligned || !vixOk) {
         const nowLog = Date.now();
         if (nowLog - (lastCooldownLog[`${page}-POS-GATES`] || 0) > 60000) {
-          console.log(`[AutoTrader-Srv] [POSITIONAL SKIP] ${page} Gates: positionalConfOk: ${positionalConfOk} (Conf: ${antigravity.confidence} vs 65), trendAligned: ${trendAligned} (Signal: ${antigravity.finalSignal}, Trend: ${overallTrend}), vixOk: ${vixOk} (VIX: ${vixNow} vs 22)`);
+          console.log(`[AutoTrader-Srv] [POSITIONAL SKIP] ${page} Gates: positionalConfOk: ${positionalConfOk} (Conf: ${antigravity.confidence} vs threshold: ${positionalConfThreshold}), trendAligned: ${trendAligned} (Signal: ${antigravity.finalSignal}, Trend: ${overallTrend}), vixOk: ${vixOk} (VIX: ${vixNow} vs 22)`);
           lastCooldownLog[`${page}-POS-GATES`] = nowLog;
         }
         break positionalBlock;
