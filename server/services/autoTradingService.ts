@@ -60,9 +60,9 @@ import path from "path";
 
 // ── Trailing Stop Loss Configuration — INTRADAY ────────────────────────────────
 const TRAIL_CONFIG = {
-  NIFTY:  { trigger: 8, offset: 5 },     // IQ200+: Trigger earlier (was 10/6)
-  BANKNIFTY: { trigger: 16, offset: 8 }, // IQ200+: Trigger earlier (was 20/10)
-  SENSEX: { trigger: 24, offset: 12 },   // IQ200+: Trigger earlier (was 30/15)
+  NIFTY:  { trigger: 12, offset: 8 },     // Relaxed slightly to prevent premature shakeouts (was 8/5)
+  BANKNIFTY: { trigger: 24, offset: 15 }, // Relaxed slightly (was 16/8)
+  SENSEX: { trigger: 36, offset: 22 },   // Relaxed slightly (was 24/12)
 } as const;
 
 // ── IQ200+: Momentum tier thresholds for adaptive targets ─────────────────
@@ -1965,8 +1965,13 @@ export async function runServerSideAutoTrading(
         // IQ200+: Berserker target is momentum-tier adaptive
         const momentumScore = momentum.momentumScore || 50;
         const isStrongMomentum = momentumScore >= 65;
-        const berserkTarget  = isStrongMomentum ? 15 : 8;  // Big target when strong, small when calm
-        const berserkSL      = isStrongMomentum ? 8  : 4;  // Proportional SL
+        
+        let multiplier = 1.0;
+        if (page === "SENSEX") multiplier = 4.0;
+        else if (page === "BANKNIFTY") multiplier = 2.5;
+
+        const berserkTarget  = Math.round((isStrongMomentum ? 15 : 8) * multiplier);
+        const berserkSL      = Math.round((isStrongMomentum ? 8  : 4) * multiplier);
 
         const berserkTierLabel = isStrongMomentum ? "BIG" : "MICRO";
         console.log(`[AutoTrader-Berserker] 🔥 ${page} Berserker | ${directionBias} | Tier: ${berserkTierLabel} | Target: ${berserkTarget}pts | SL: ${berserkSL}pts | Shadow: ${isBerserkerShadow}`);

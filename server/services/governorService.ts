@@ -19,9 +19,9 @@ import { globalBus } from "./globalDataBus.js";
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 const GOVERNOR_CONFIG = {
-  maxDailyLoss:        -2000,   // ₹ paper loss limit per day
-  consecutiveLossMax:  3,       // Halt after N consecutive losses
-  consecutiveCooldownMs: 30 * 60 * 1000, // 30 min cooldown
+  maxDailyLoss:        -25000,  // ₹ paper loss limit per day (increased for testing)
+  consecutiveLossMax:  5,       // Halt after N consecutive losses (relaxed for testing)
+  consecutiveCooldownMs: 5 * 60 * 1000, // 5 min cooldown (shorter for testing)
   vixHardGate:         25,      // VIX above this → pause buying
   healthCheckIntervalMs: 10000, // Broadcast every 10s
 };

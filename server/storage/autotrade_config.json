@@ -1,0 +1,8 @@
+{
+  "isActive": true,
+  "mode": "PAPER",
+  "hedgeMode": false,
+  "trailingSL": true,
+  "levelBasedTarget": true,
+  "maxTradesLimit": 500
+}
