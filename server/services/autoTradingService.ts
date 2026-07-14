@@ -1626,7 +1626,7 @@ export async function runServerSideAutoTrading(
 
   const alignOk = !alignment.noTradeFilter;
 
-  if ((isActionable || isPositionalActionable) && alignOk && isMarketOpen) {
+  if ((isActionable || isPositionalActionable) && isMarketOpen) {
     const openIntradayPositions = openPositions.filter(p => {
       try {
         const parsed = JSON.parse(p.notes || "{}");
@@ -1657,6 +1657,14 @@ export async function runServerSideAutoTrading(
     // ── 3a. INTRADAY TRADE TRIGGER ──
     intradayBlock: {
       if (!isActionable) break intradayBlock;
+      if (!alignOk) {
+        const nowLog = Date.now();
+        if (nowLog - (lastCooldownLog[`${page}-INTRA-ALIGN`] || 0) > 60000) {
+          console.log(`[AutoTrader-Srv] [INTRADAY SKIP] ${page} blocked by alignment: ${alignment.noTradeReason}`);
+          lastCooldownLog[`${page}-INTRA-ALIGN`] = nowLog;
+        }
+        break intradayBlock;
+      }
       if (hasOpenIntraday) break intradayBlock;
 
     // ── Weighted Stock Signal Gate (YOUR KEY INSIGHT) ─────────────────────
@@ -1902,7 +1910,7 @@ export async function runServerSideAutoTrading(
 
   const hasOpenForThisMode = isBerserkerShadow ? hasOpenShadowIntraday : hasOpenRealIntraday;
 
-  if (!hasOpenForThisMode && !tradeTriggeredThisTick && isMarketOpen) {
+  if (!hasOpenForThisMode && !tradeTriggeredThisTick && isMarketOpen && alignOk) {
     let onBerserkerCooldown = false;
     const lastClosedIntraday = (isBerserkerShadow ? getShadowTrades("CLOSED") : getPaperTrades("CLOSED")).find(t => {
       try {
@@ -2013,7 +2021,16 @@ export async function runServerSideAutoTrading(
 
     // ── 3b. POSITIONAL TRADE TRIGGER ──
     positionalBlock: {
-      if (!isPositionalActionable) break positionalBlock;
+      if (!isPositionalActionable) {
+        const nowLog = Date.now();
+        if (nowLog - (lastCooldownLog[`${page}-POS-ACT`] || 0) > 60000) {
+          const hasSignal = antigravity.finalSignal === "BUY_CE" || antigravity.finalSignal === "BUY_PE";
+          const consensusMatches = consensus.decision === antigravity.finalSignal;
+          console.log(`[AutoTrader-Srv] [POSITIONAL SKIP] ${page} isPositionalActionable: false. HasSignal: ${hasSignal} (${antigravity.finalSignal}), ConsensusMatches: ${consensusMatches} (Consensus: ${consensus.decision}), HasOppositeCsPosition: ${hasOppositeCsPosition}`);
+          lastCooldownLog[`${page}-POS-ACT`] = nowLog;
+        }
+        break positionalBlock;
+      }
 
       const positionalConfOk = antigravity.confidence >= 65; // IQ 200: 65% is enough if trend is strong
       
@@ -2028,37 +2045,65 @@ export async function runServerSideAutoTrading(
       const vixNow = marketState.niftyOptionChain.indiaVix || 15;
       const vixOk = vixNow < 22; // Block if VIX is dangerously high (crash impending)
       
-      if (positionalConfOk && trendAligned && vixOk) {
-        // Cooldown check for positional (longer: 10 minutes)
-        const POS_COOLDOWN_MS = 10 * 60 * 1000;
-        const lastClosedReal = getPositionTrades("CLOSED_PROFIT").concat(getPositionTrades("CLOSED_LOSS")).sort((a, b) => b.updatedAt - a.updatedAt).find(t => t.instrument === page);
-        const lastClosedShadow = getShadowTrades("CLOSED").sort((a, b) => (b.closed_at || 0) - (a.closed_at || 0)).find(t => {
-          try {
-            return t.instrument === page && JSON.parse(t.notes || "{}").trade_type === "POSITIONAL";
-          } catch { return false; }
-        });
-        
-        const msSinceClosedReal = lastClosedReal ? (Date.now() - lastClosedReal.updatedAt) : Infinity;
-        const msSinceClosedShadow = lastClosedShadow && lastClosedShadow.closed_at ? (Date.now() - lastClosedShadow.closed_at) : Infinity;
-        const onCooldown = Math.min(msSinceClosedReal, msSinceClosedShadow) < POS_COOLDOWN_MS;
+      if (!positionalConfOk || !trendAligned || !vixOk) {
+        const nowLog = Date.now();
+        if (nowLog - (lastCooldownLog[`${page}-POS-GATES`] || 0) > 60000) {
+          console.log(`[AutoTrader-Srv] [POSITIONAL SKIP] ${page} Gates: positionalConfOk: ${positionalConfOk} (Conf: ${antigravity.confidence} vs 65), trendAligned: ${trendAligned} (Signal: ${antigravity.finalSignal}, Trend: ${overallTrend}), vixOk: ${vixOk} (VIX: ${vixNow} vs 22)`);
+          lastCooldownLog[`${page}-POS-GATES`] = nowLog;
+        }
+        break positionalBlock;
+      }
 
-        if (!onCooldown) {
-          // If Promoted -> Live Positional Trade (saved to position_trades.json)
-          if (consensus.isPromoted) {
-            const canPyramidReal = getPositionTrades("ACTIVE").some(t => t.instrument === page && t.unrealizedPnL > (t.totalPremium * 0.5));
-            if (activeRealPositionalCount < MAX_REAL_POSITION_TRADES || canPyramidReal) {
-              triggerAutoTrade(page, spotPrice, strikes, antigravity, alignment, report, momentum, breakout, "POSITIONAL", io, false, undefined, false, aiEngineV2).catch(e => {
-                console.error(`[AutoTrader-Srv] [POSITIONAL REAL Entry Error] [${page}]`, e.message);
-              });
-            }
-          } else {
-            // If Sandbox/Not Promoted -> Background Journal Positional Trade (saved to te_shadow_trades)
-            const canPyramidShadow = getShadowTrades("OPEN").some(t => { try { return t.instrument === page && JSON.parse(t.notes || "{}").trade_type === "POSITIONAL" && (t.latest_ltp || 0) > (t.entry_price || 0) * 1.5; } catch { return false; } });
-            if (activeShadowPositionalCount < MAX_SHADOW_POSITION_TRADES || canPyramidShadow) {
-              triggerAutoTrade(page, spotPrice, strikes, antigravity, alignment, report, momentum, breakout, "POSITIONAL", io, false, undefined, true, aiEngineV2).catch(e => {
-                console.error(`[AutoTrader-Srv] [POSITIONAL SHADOW Entry Error] [${page}]`, e.message);
-              });
-            }
+      // Cooldown check for positional (longer: 10 minutes)
+      const POS_COOLDOWN_MS = 10 * 60 * 1000;
+      const lastClosedReal = getPositionTrades("CLOSED_PROFIT").concat(getPositionTrades("CLOSED_LOSS")).sort((a, b) => b.updatedAt - a.updatedAt).find(t => t.instrument === page);
+      const lastClosedShadow = getShadowTrades("CLOSED").sort((a, b) => (b.closed_at || 0) - (a.closed_at || 0)).find(t => {
+        try {
+          return t.instrument === page && JSON.parse(t.notes || "{}").trade_type === "POSITIONAL";
+        } catch { return false; }
+      });
+      
+      const msSinceClosedReal = lastClosedReal ? (Date.now() - lastClosedReal.updatedAt) : Infinity;
+      const msSinceClosedShadow = lastClosedShadow && lastClosedShadow.closed_at ? (Date.now() - lastClosedShadow.closed_at) : Infinity;
+      const onCooldown = Math.min(msSinceClosedReal, msSinceClosedShadow) < POS_COOLDOWN_MS;
+
+      if (onCooldown) {
+        const nowLog = Date.now();
+        if (nowLog - (lastCooldownLog[`${page}-POS-COOLDOWN`] || 0) > 60000) {
+          console.log(`[AutoTrader-Srv] [POSITIONAL SKIP] ${page} is on cooldown. Last Real: ${msSinceClosedReal.toFixed(0)}ms, Last Shadow: ${msSinceClosedShadow.toFixed(0)}ms`);
+          lastCooldownLog[`${page}-POS-COOLDOWN`] = nowLog;
+        }
+        break positionalBlock;
+      }
+
+      // If Promoted -> Live Positional Trade (saved to position_trades.json)
+      if (consensus.isPromoted) {
+        const canPyramidReal = getPositionTrades("ACTIVE").some(t => t.instrument === page && t.unrealizedPnL > (t.totalPremium * 0.5));
+        if (activeRealPositionalCount < MAX_REAL_POSITION_TRADES || canPyramidReal) {
+          console.log(`[AutoTrader-Srv] 🎯 TRIGGERING REAL POSITIONAL TRADE FOR ${page} at spot ${spotPrice}`);
+          triggerAutoTrade(page, spotPrice, strikes, antigravity, alignment, report, momentum, breakout, "POSITIONAL", io, false, undefined, false, aiEngineV2).catch(e => {
+            console.error(`[AutoTrader-Srv] [POSITIONAL REAL Entry Error] [${page}]`, e.message);
+          });
+        } else {
+          const nowLog = Date.now();
+          if (nowLog - (lastCooldownLog[`${page}-POS-REAL-CAP`] || 0) > 60000) {
+            console.log(`[AutoTrader-Srv] [POSITIONAL SKIP] ${page} REAL capacity full: ${activeRealPositionalCount}/${MAX_REAL_POSITION_TRADES}. Pyramid: ${canPyramidReal}`);
+            lastCooldownLog[`${page}-POS-REAL-CAP`] = nowLog;
+          }
+        }
+      } else {
+        // If Sandbox/Not Promoted -> Background Journal Positional Trade (saved to te_shadow_trades)
+        const canPyramidShadow = getShadowTrades("OPEN").some(t => { try { return t.instrument === page && JSON.parse(t.notes || "{}").trade_type === "POSITIONAL" && (t.latest_ltp || 0) > (t.entry_price || 0) * 1.5; } catch { return false; } });
+        if (activeShadowPositionalCount < MAX_SHADOW_POSITION_TRADES || canPyramidShadow) {
+          console.log(`[AutoTrader-Srv] 🎯 TRIGGERING SHADOW POSITIONAL TRADE FOR ${page} at spot ${spotPrice}`);
+          triggerAutoTrade(page, spotPrice, strikes, antigravity, alignment, report, momentum, breakout, "POSITIONAL", io, false, undefined, true, aiEngineV2).catch(e => {
+            console.error(`[AutoTrader-Srv] [POSITIONAL SHADOW Entry Error] [${page}]`, e.message);
+          });
+        } else {
+          const nowLog = Date.now();
+          if (nowLog - (lastCooldownLog[`${page}-POS-SHAD-CAP`] || 0) > 60000) {
+            console.log(`[AutoTrader-Srv] [POSITIONAL SKIP] ${page} SHADOW capacity full: ${activeShadowPositionalCount}/${MAX_SHADOW_POSITION_TRADES}. Pyramid: ${canPyramidShadow}`);
+            lastCooldownLog[`${page}-POS-SHAD-CAP`] = nowLog;
           }
         }
       }
