@@ -4,6 +4,7 @@ import { calcWeightedSummary } from "../utils/weightedSummary.js";
 import { runStrategyEngine } from "./strategyEngine.js";
 import { estimateMarketDirection } from "./marketDirectionEngine.js";
 import { processTick as mlProcessTick, type MarketContext as MLMarketContext } from "./multiStrategyRunner.js";
+import { evaluateJarvisScalper } from "./jarvisScalperEngine.js";
 
 // Decoupled throttle durations
 const THROTTLE_MARKET_MS = 40;     // 25 updates per second for stocks and spots
@@ -155,6 +156,13 @@ export function broadcastLive(io: SocketIOServer): void {
     sensexMarketDir: estimateMarketDirection("SENSEX"),
     bankniftyMarketDir: estimateMarketDirection("BANKNIFTY"),
   });
+
+  // Evaluate JARVIS AI Micro-Scalper Engine on live tick
+  try {
+    evaluateJarvisScalper(io);
+  } catch (err: any) {
+    console.error("[JarvisScalper] Evaluate error:", err.message);
+  }
 
   // Run AI strategies on a fire-and-forget basis, throttled to 10hz to save SQL CPU
   if (!_pendingNiftyAI) {

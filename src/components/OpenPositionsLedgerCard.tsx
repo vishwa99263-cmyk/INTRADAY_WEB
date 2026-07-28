@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from "react";
-import { BookOpen, RefreshCw, TrendingUp, TrendingDown } from "lucide-react";
+import { RefreshCw, TrendingUp, TrendingDown } from "lucide-react";
 import { OptionStrike, TEPaperTrade } from "../types";
 
 export interface OpenPositionsLedgerCardProps {
   activePage: "NIFTY" | "SENSEX" | "BANKNIFTY" | string;
   spotPrice: number;
-  dbTrades: TEPaperTrade[];
+  dbTrades: TEPaperTrade[] | any[];
   optionChain: any[];
   niftyOptionChain?: any[];
   sensexOptionChain?: any[];
@@ -14,6 +14,7 @@ export interface OpenPositionsLedgerCardProps {
   darkMode?: boolean;
   forceInstrument?: "NIFTY" | "SENSEX" | "BANKNIFTY"; // lock card to one instrument
   tradeTypeFilter?: "INTRADAY" | "POSITIONAL";
+  isRealTrade?: boolean;
 }
 
 const getApiUrl = (path: string) => {
@@ -35,11 +36,46 @@ export default function OpenPositionsLedgerCard({
   darkMode = false,
   forceInstrument,
   tradeTypeFilter,
+  isRealTrade = false,
 }: OpenPositionsLedgerCardProps) {
   const [closingId, setClosingId] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<FilterTab>(forceInstrument ?? "ALL");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [historyLimit, setHistoryLimit] = useState(10);
+  const [fyersAutoTrade, setFyersAutoTrade] = useState(false);
+
+  React.useEffect(() => {
+    if (forceInstrument) {
+      const stored = localStorage.getItem(`fyers_auto_trade_${forceInstrument}`);
+      if (stored === "true") setFyersAutoTrade(true);
+
+      // Sync from backend
+      fetch(getApiUrl("/api/fyers/auto-trade-state"))
+        .then(res => res.json())
+        .then(data => {
+          if (data.success && data.states) {
+            const instVal = !!data.states[forceInstrument];
+            setFyersAutoTrade(instVal);
+            localStorage.setItem(`fyers_auto_trade_${forceInstrument}`, instVal ? "true" : "false");
+          }
+        })
+        .catch(() => {});
+    }
+  }, [forceInstrument]);
+
+  const handleToggleAutoTrade = () => {
+    if (!forceInstrument) return;
+    const nextVal = !fyersAutoTrade;
+    setFyersAutoTrade(nextVal);
+    localStorage.setItem(`fyers_auto_trade_${forceInstrument}`, nextVal ? "true" : "false");
+
+    // Sync to backend
+    fetch(getApiUrl("/api/fyers/auto-trade-state"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instrument: forceInstrument, enabled: nextVal }),
+    }).catch(err => console.error("Failed to sync auto-trade state:", err));
+  };
 
   const HEDGE_DIRS = new Set(["BULL_SPREAD", "BEAR_SPREAD"]);
   const isNakedTrade = (t: TEPaperTrade) =>
@@ -66,10 +102,11 @@ export default function OpenPositionsLedgerCard({
       .filter(t => !tradeTypeFilter || (t as any).tradeType === tradeTypeFilter || (t as any).strategyName === tradeTypeFilter)
       .map(pos => {
         const currentPremium = getCurrentPremium(pos);
-        const livePnl = (currentPremium - pos.entry_price) * pos.qty * pos.lot_size;
+        const lotMultiplier = isRealTrade ? 1 : (pos.lot_size || 1);
+        const livePnl = (currentPremium - pos.entry_price) * pos.qty * lotMultiplier;
         return { ...pos, currentPremium, livePnl: parseFloat(livePnl.toFixed(1)) };
       });
-  }, [dbTrades, niftyOptionChain, sensexOptionChain, bankniftyOptionChain, optionChain, tradeTypeFilter]);
+  }, [dbTrades, niftyOptionChain, sensexOptionChain, bankniftyOptionChain, optionChain, tradeTypeFilter, isRealTrade]);
 
   // PENDING trades (all instruments)
   const allPendingPositions = useMemo(() => {
@@ -83,14 +120,37 @@ export default function OpenPositionsLedgerCard({
       }));
   }, [dbTrades, niftyOptionChain, sensexOptionChain, bankniftyOptionChain, optionChain, tradeTypeFilter]);
 
+  // ── Market-hours detection (IST 9:15 – 15:30) ──────────────────────────────
+  const isMarketHours = useMemo(() => {
+    const now  = new Date();
+    const mins = now.getHours() * 60 + now.getMinutes();
+    return mins >= 555 && mins < 930; // 9:15 = 555, 15:30 = 930
+  }, []);
+
+  // ── Today's midnight in ms ───────────────────────────────────────────────────
+  const todayStart = useMemo(() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }, []);
+
   // CLOSED trades history
+  // • During market hours  → TODAY only (intraday closed trades)
+  // • Outside market hours → All history (old data visible on load)
   const allClosedTrades = useMemo(() => {
     return dbTrades
-      .filter(t => t.status === "CLOSED")
+      .filter(t => t.status === "CLOSED" || t.status === "FAILED")
       .filter(t => !forceInstrument || t.instrument === forceInstrument)
+      .filter(t => {
+        if (!isMarketHours) return true; // outside hours: show everything
+        const closedAt = (t as any).closed_at;
+        if (!closedAt) return false;
+        return Number(closedAt) >= todayStart; // during hours: today only
+      })
       .sort((a, b) => ((b as any).closed_at || 0) - ((a as any).closed_at || 0))
       .slice(0, historyLimit);
-  }, [dbTrades, forceInstrument, historyLimit]);
+  }, [dbTrades, forceInstrument, historyLimit, todayStart, isMarketHours]);
+
 
   const filtered = useMemo(() => {
     if (filterTab === "PENDING") {
@@ -117,15 +177,23 @@ export default function OpenPositionsLedgerCard({
     if (closingId) return;
     setClosingId(pos.id);
     try {
-      const res = await fetch(getApiUrl("/api/te/paper-trades/close"), {
+      const url = isRealTrade
+        ? getApiUrl(`/api/real-trades/close/${pos.id}`)
+        : getApiUrl("/api/te/paper-trades/close");
+      
+      const body = isRealTrade
+        ? { exit_price: parseFloat(pos.currentPremium.toFixed(1)), reason: "MANUAL" }
+        : {
+            id: pos.id,
+            exit_price: parseFloat(pos.currentPremium.toFixed(1)),
+            pnl: parseFloat(pos.livePnl.toFixed(1)),
+            notes: `${pos.notes || ""} [Manually Closed]`,
+          };
+
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: pos.id,
-          exit_price: parseFloat(pos.currentPremium.toFixed(1)),
-          pnl: parseFloat(pos.livePnl.toFixed(1)),
-          notes: `${pos.notes || ""} [Manually Closed]`,
-        }),
+        body: JSON.stringify(body),
       });
       if (res.ok && onTradeClosed) onTradeClosed();
     } catch (e) {
@@ -146,63 +214,187 @@ export default function OpenPositionsLedgerCard({
     { key: "HISTORY",   label: "📜 HISTORY", count: closedCount,   color: "#64748b" },
   ];
 
+  // ── Instrument accent colour ─────────────────────────────────────────────
+  const instColor =
+    forceInstrument === "NIFTY"     ? "#10b981" :
+    forceInstrument === "BANKNIFTY" ? "#8b5cf6" :
+    forceInstrument === "SENSEX"    ? "#f59e0b" : "#6366f1";
+
+  // ── Instrument 1-2 letter initial + full display name ─────────────────────
+  const instInitial =
+    forceInstrument === "NIFTY"     ? "N" :
+    forceInstrument === "BANKNIFTY" ? "B" :
+    forceInstrument === "SENSEX"    ? "S" : "◈";
+
+  const instName =
+    forceInstrument === "NIFTY"     ? "NIFTY" :
+    forceInstrument === "BANKNIFTY" ? "BANKNIFTY" :
+    forceInstrument === "SENSEX"    ? "SENSEX" :
+    forceInstrument ?? "POSITIONS";
+
   return (
     <div
-      className="w-full flex flex-col gap-1.5 font-sans select-none border rounded-lg shadow-md transition-all duration-300 relative overflow-hidden"
+      className="w-full flex flex-col select-none relative overflow-hidden rounded-lg transition-all duration-300"
       style={{
-        background: "linear-gradient(135deg, #03050a 0%, #060a14 55%, #03050a 100%)",
-        borderColor: "rgba(255,255,255,0.06)",
-        color: "#f1f5f9",
-        boxShadow: "0 4px 24px rgba(0,0,0,0.6)",
+        background: "linear-gradient(145deg, #020508 0%, #04080f 60%, #020508 100%)",
+        border: `1px solid ${instColor}28`,
+        boxShadow: `0 0 20px ${instColor}08, 0 4px 24px rgba(0,0,0,0.7)`,
+        fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
       }}
     >
-      {/* Top accent */}
-      <div className="absolute top-0 left-0 right-0 h-[2.5px] bg-gradient-to-r from-teal-500 via-indigo-500 to-purple-500" />
+      {/* ── Top glow beam (instrument-colored) ─────────────────────────── */}
+      <div
+        className="absolute top-0 left-0 right-0 h-[1.5px] pointer-events-none"
+        style={{ background: `linear-gradient(90deg, transparent, ${instColor}90, transparent)`,
+                 boxShadow: `0 0 8px ${instColor}60` }}
+      />
+      {/* ── CRT scanline texture ────────────────────────────────────────── */}
+      <div
+        className="absolute inset-0 pointer-events-none z-0"
+        style={{
+          backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.02) 2px, rgba(0,0,0,0.02) 4px)",
+        }}
+      />
 
-      <div className="p-2 pb-0">
-        {/* Header */}
-        <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
-          <div className="flex items-center gap-1.5">
-            <BookOpen size={11} className={forceInstrument === "NIFTY" ? "text-emerald-400" : forceInstrument === "BANKNIFTY" ? "text-purple-400" : forceInstrument === "SENSEX" ? "text-amber-400" : "text-teal-400"} />
-            <span className="text-[9.5px] font-black uppercase tracking-widest text-slate-400">
-              {forceInstrument ? `${forceInstrument} POSITIONS` : "Open Positions Ledger"}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* HEADER ROW                                                        */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      <div
+        className="relative z-10 flex items-center justify-between px-2 pt-2 pb-1.5"
+        style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}
+      >
+        {/* LEFT: Instrument dot + icon + ACTIVE + FYERS AUTO */}
+        <div className="flex items-center gap-1.5 min-w-0">
+
+          {/* Colored instrument marker — NO text name */}
+          <div
+            className="flex items-center justify-center w-5 h-5 rounded-md flex-shrink-0"
+            style={{
+              background: `${instColor}18`,
+              border: `1px solid ${instColor}40`,
+              boxShadow: `0 0 8px ${instColor}25`,
+            }}
+          >
+            <span
+              className="text-[9px] font-black leading-none"
+              style={{ color: instColor }}
+            >
+              {instInitial}
             </span>
-            {forceInstrument && (
-              <span className="text-[7.5px] font-black px-1.5 py-0.5 rounded border uppercase text-indigo-400 bg-indigo-500/10 border-indigo-500/30 shadow-[inset_0_0_8px_rgba(99,102,241,0.15)] flex items-center gap-1">
-                <span className="w-1 h-1 rounded-full bg-indigo-500 animate-ping" />
-                ACTIVE
+          </div>
+
+          {/* Full instrument name — colored + glowing */}
+          <span
+            className="text-[9.5px] font-black uppercase tracking-widest leading-none truncate flex-shrink-0"
+            style={{
+              color: instColor,
+              textShadow: `0 0 12px ${instColor}70`,
+            }}
+          >
+            {instName}
+          </span>
+
+          {/* Pulsing ACTIVE badge */}
+          {forceInstrument && (
+            <span
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[7.5px] font-black uppercase tracking-widest flex-shrink-0"
+              style={{
+                color: "#818cf8",
+                background: "rgba(99,102,241,0.1)",
+                border: "1px solid rgba(99,102,241,0.28)",
+                boxShadow: "inset 0 0 6px rgba(99,102,241,0.12)",
+              }}
+            >
+              <span
+                className="relative flex h-1.5 w-1.5"
+              >
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-500" />
               </span>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5">
-            {totalPnl >= 0
-              ? <TrendingUp size={10} className="text-emerald-400" />
-              : <TrendingDown size={10} className="text-rose-400" />}
-            <span className={`text-[10px] font-black font-mono ${totalPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              {totalPnl >= 0 ? "+" : ""}₹{totalPnl.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+              ACTIVE
             </span>
-          </div>
+          )}
+
+          {/* FYERS AUTO toggle — icon-only dot + label, ultra compact */}
+          {forceInstrument && (
+            <button
+              onClick={handleToggleAutoTrade}
+              title={`Toggle Fyers Auto-Trade for ${forceInstrument}`}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[7.5px] font-black uppercase tracking-widest transition-all cursor-pointer outline-none flex-shrink-0"
+              style={{
+                color: fyersAutoTrade ? "#10b981" : "#475569",
+                background: fyersAutoTrade ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.02)",
+                borderColor: fyersAutoTrade ? "rgba(16,185,129,0.35)" : "rgba(255,255,255,0.06)",
+                boxShadow: fyersAutoTrade ? "0 0 8px rgba(16,185,129,0.18)" : "none",
+              }}
+            >
+              <div
+                className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                style={{
+                  background: fyersAutoTrade ? "#10b981" : "#334155",
+                  boxShadow: fyersAutoTrade ? "0 0 5px #10b981" : "none",
+                  animation: fyersAutoTrade ? "pulse 1.5s infinite" : "none",
+                }}
+              />
+              <span>AUTO</span>
+            </button>
+          )}
         </div>
 
-        {/* Filter Tabs — only when not force-locked */}
+        {/* RIGHT: Live PnL — micro compact */}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {totalPnl >= 0
+            ? <TrendingUp size={9} style={{ color: "#10b981" }} />
+            : <TrendingDown size={9} style={{ color: "#f43f5e" }} />
+          }
+          <span
+            className="text-[10.5px] font-black font-mono leading-none"
+            style={{
+              color: totalPnl >= 0 ? "#10b981" : "#f43f5e",
+              textShadow: totalPnl >= 0 ? "0 0 10px rgba(16,185,129,0.4)" : "0 0 10px rgba(244,63,94,0.4)",
+            }}
+          >
+            {totalPnl >= 0 ? "+" : ""}₹{totalPnl.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+          </span>
+          {/* Lightning icon — quick nav */}
+          <button
+            onClick={() => {}}
+            className="ml-0.5 w-4 h-4 flex items-center justify-center rounded"
+            style={{ color: instColor, background: `${instColor}12`, border: `1px solid ${instColor}25` }}
+            title="Settings"
+          >
+            <svg width="7" height="7" viewBox="0 0 10 12" fill="currentColor">
+              <path d="M6 0L0 7h5l-1 5 6-8H5L6 0z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* TAB ROW                                                           */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      <div className="relative z-10 px-2 pt-1 pb-1.5">
+
+        {/* ── Multi-instrument tabs (no forceInstrument) ─────────────── */}
         {!forceInstrument && (
-          <div className="flex items-center gap-1 pt-1.5 pb-1 flex-wrap">
+          <div className="flex items-center gap-1 flex-wrap">
             {tabs.map(tab => (
               <button
                 key={tab.key}
                 onClick={() => setFilterTab(tab.key)}
-                className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider border transition-all cursor-pointer"
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border transition-all cursor-pointer"
                 style={{
                   background: filterTab === tab.key ? `${tab.color}18` : "transparent",
-                  borderColor: filterTab === tab.key ? `${tab.color}50` : "rgba(255,255,255,0.06)",
-                  color: filterTab === tab.key ? tab.color : "#64748b",
+                  borderColor: filterTab === tab.key ? `${tab.color}45` : "rgba(255,255,255,0.05)",
+                  color: filterTab === tab.key ? tab.color : "#334155",
+                  boxShadow: filterTab === tab.key ? `0 0 8px ${tab.color}18` : "none",
                 }}
               >
-                {tab.label}
+                <span>{tab.label}</span>
                 <span
-                  className="px-1 py-px rounded text-[7.5px] font-black"
+                  className="px-1 rounded text-[7.5px] font-black"
                   style={{
-                    background: filterTab === tab.key ? `${tab.color}25` : "rgba(255,255,255,0.04)",
+                    background: filterTab === tab.key ? `${tab.color}22` : "rgba(255,255,255,0.04)",
                     color: filterTab === tab.key ? tab.color : "#475569",
                   }}
                 >
@@ -213,29 +405,48 @@ export default function OpenPositionsLedgerCard({
           </div>
         )}
 
-        {/* Mini tabs when force-locked */}
+        {/* ── Instrument-locked mini tabs ─────────────────────────────── */}
         {forceInstrument && (
-          <div className="flex items-center gap-1 pt-1.5 pb-1">
+          <div className="flex items-center gap-1">
             {(["ALL", "PENDING", "HISTORY"] as const).map(key => {
-              const count = key === "PENDING"
-                ? allPendingPositions.filter(p => p.instrument === forceInstrument).length
-                : key === "HISTORY" ? closedCount
-                : filtered.length;
-              const color = key === "PENDING" ? "#f97316" : key === "HISTORY" ? "#64748b" : (forceInstrument === "NIFTY" ? "#10b981" : forceInstrument === "BANKNIFTY" ? "#8b5cf6" : "#f59e0b");
-              const isActive = key === "HISTORY" ? filterTab === "HISTORY" : key === "PENDING" ? filterTab === "PENDING" : (filterTab !== "PENDING" && filterTab !== "HISTORY");
+              const count =
+                key === "PENDING"
+                  ? allPendingPositions.filter(p => p.instrument === forceInstrument).length
+                  : key === "HISTORY"
+                  ? closedCount
+                  : filtered.length;
+              const tabColor =
+                key === "PENDING" ? "#f97316"
+                : key === "HISTORY" ? "#64748b"
+                : instColor;
+              const isActive =
+                key === "HISTORY"  ? filterTab === "HISTORY"
+                : key === "PENDING" ? filterTab === "PENDING"
+                : (filterTab !== "PENDING" && filterTab !== "HISTORY");
+              const tabLabel =
+                key === "PENDING" ? "⏳ WAIT"
+                : key === "HISTORY" ? "📜 HIST"
+                : "OPEN";
               return (
                 <button
                   key={key}
                   onClick={() => setFilterTab(key === "ALL" ? forceInstrument : key)}
-                  className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[8.5px] font-black uppercase tracking-wider border transition-all cursor-pointer"
+                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border transition-all cursor-pointer"
                   style={{
-                    background: isActive ? `${color}18` : "transparent",
-                    borderColor: isActive ? `${color}50` : "rgba(255,255,255,0.06)",
-                    color: isActive ? color : "#64748b",
+                    background: isActive ? `${tabColor}18` : "transparent",
+                    borderColor: isActive ? `${tabColor}45` : "rgba(255,255,255,0.05)",
+                    color: isActive ? tabColor : "#334155",
+                    boxShadow: isActive ? `0 0 8px ${tabColor}18` : "none",
                   }}
                 >
-                  {key === "PENDING" ? "⏳ WAIT" : key === "HISTORY" ? "📜 HIST" : "OPEN"}
-                  <span className="px-1 py-px rounded text-[7.5px] font-black" style={{ background: "rgba(255,255,255,0.05)" }}>
+                  <span>{tabLabel}</span>
+                  <span
+                    className="px-1 rounded text-[7.5px] font-black"
+                    style={{
+                      background: isActive ? `${tabColor}22` : "rgba(255,255,255,0.04)",
+                      color: isActive ? tabColor : "#475569",
+                    }}
+                  >
                     {count}
                   </span>
                 </button>
@@ -247,10 +458,50 @@ export default function OpenPositionsLedgerCard({
 
       {/* HISTORY VIEW */}
       {filterTab === "HISTORY" && (
-        <div className="flex flex-col gap-1.5 px-2 pb-2 max-h-[260px] overflow-y-auto">
+        <div className="flex flex-col gap-1.5 px-2 pb-2 max-h-[260px] overflow-y-auto custom-dashboard-scrollbar">
+
+          {/* ── Mode Indicator Banner ──────────────────────────────────── */}
+          <div className="flex items-center justify-between pt-0.5">
+            {isMarketHours ? (
+              <div
+                className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[7.5px] font-black uppercase tracking-widest border"
+                style={{
+                  color: "#10b981",
+                  background: "rgba(16,185,129,0.08)",
+                  borderColor: "rgba(16,185,129,0.25)",
+                }}
+              >
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                </span>
+                TODAY · LIVE
+              </div>
+            ) : (
+              <div
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-[7.5px] font-black uppercase tracking-widest border"
+                style={{
+                  color: "#64748b",
+                  background: "rgba(100,116,139,0.07)",
+                  borderColor: "rgba(100,116,139,0.2)",
+                }}
+              >
+                <svg width="8" height="8" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M3 1a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v1h1a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1h1V1zm1 2H3v10h10V3h-1v1a1 1 0 0 1-2 0V3H6v1a1 1 0 0 1-2 0V3z"/>
+                </svg>
+                ALL HISTORY
+              </div>
+            )}
+            <span className="text-[7px] text-slate-700 font-mono">
+              {allClosedTrades.length} trade{allClosedTrades.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+
           {allClosedTrades.length === 0 ? (
-            <div className="text-center py-5 text-[10px] italic rounded-md border border-dashed text-slate-600 border-slate-800/40">
-              No closed trades yet
+            <div className="text-center py-5 text-[9.5px] italic rounded-md border border-dashed text-slate-600 border-slate-800/40">
+              {isMarketHours
+                ? "📭 No trades closed today"
+                : "📭 No trade history found"}
             </div>
           ) : (
             <>
@@ -259,8 +510,18 @@ export default function OpenPositionsLedgerCard({
                 const isWin = pnl > 0;
                 const inst = t.instrument ?? "NIFTY";
                 const instrColor = inst === "NIFTY" ? "#10b981" : inst === "BANKNIFTY" ? "#8b5cf6" : "#f59e0b";
-                const closedAt = (t as any).closed_at ? new Date((t as any).closed_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—";
-                const entryAt = (t as any).entry_time ? new Date((t as any).entry_time).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—";
+                const closedAtMs = (t as any).closed_at;
+                const closedAt = closedAtMs
+                  ? new Date(closedAtMs).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+                  : "—";
+                const entryAt = (t as any).entry_time
+                  ? new Date((t as any).entry_time).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+                  : "—";
+                // Show date prefix on old trades (outside market hours)
+                const tradeDate = closedAtMs && !isMarketHours
+                  ? new Date(closedAtMs).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })
+                  : null;
+
                 return (
                   <div key={t.id}
                     className="p-2 rounded-md flex flex-col gap-1 text-xs font-mono border"
@@ -273,34 +534,49 @@ export default function OpenPositionsLedgerCard({
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[7.5px] font-black px-1 py-px rounded border uppercase"
+                        <span className="text-[8.5px] font-black px-1.5 py-0.5 rounded border uppercase"
                           style={{ color: instrColor, borderColor: `${instrColor}40`, background: `${instrColor}12` }}>
                           {inst}
                         </span>
-                        <span className={`text-[9px] font-black px-1.5 py-px rounded border uppercase ${
-                          isWin ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400" : "bg-red-500/15 border-red-500/30 text-red-400"
+                        <span className={`text-[10px] font-black px-1.5 py-0.5 rounded border uppercase ${
+                          t.status === "FAILED" ? "bg-red-500/15 border-red-500/30 text-rose-500" : isWin ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400" : "bg-red-500/15 border-red-500/30 text-red-400"
                         }`}>
-                          {isWin ? "✅ WIN" : "❌ LOSS"}
+                          {t.status === "FAILED" ? "❌ FAILED" : isWin ? "✅ WIN" : "❌ LOSS"}
                         </span>
-                        <span className="text-[8.5px] text-slate-500">{t.direction?.replace("BUY_", "")} {t.strike}</span>
+                        <span className="text-[9.5px] font-bold text-slate-300">{t.direction?.replace("BUY_", "")} {t.strike}</span>
                       </div>
-                      <span className={`font-black text-[11px] ${isWin ? "text-emerald-400" : "text-rose-400"}`}>
+                      <span className={`font-black text-[13px] ${isWin ? "text-emerald-400" : "text-rose-400"}`}>
                         {pnl >= 0 ? "+" : ""}₹{pnl.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
                       </span>
                     </div>
-                    <div className="flex justify-between text-[8px] text-slate-600">
+                    <div className="flex justify-between text-[9px] text-slate-400">
                       <span>Entry: ₹{t.entry_price?.toFixed(1)} → Exit: ₹{((t as any).exit_price ?? 0).toFixed(1)}</span>
-                      <span>{entryAt} → {closedAt}</span>
+                      <span className="flex items-center gap-1">
+                        {tradeDate && (
+                          <span
+                            className="text-[7.5px] font-black px-1 py-px rounded uppercase"
+                            style={{ color: "#64748b", background: "rgba(100,116,139,0.12)", border: "1px solid rgba(100,116,139,0.2)" }}
+                          >
+                            {tradeDate}
+                          </span>
+                        )}
+                        {entryAt} → {closedAt}
+                      </span>
                     </div>
                     {t.strategyName && (
-                      <div className="text-[7.5px] text-violet-400/70 truncate">{t.strategyName}</div>
+                      <div className="text-[8.5px] text-violet-400/90 truncate font-semibold">{t.strategyName}</div>
+                    )}
+                    {t.notes && (
+                      <div className={`text-[8.5px] mt-1 font-semibold truncate ${t.status === "FAILED" ? "text-rose-400" : "text-slate-500"}`}>
+                        {t.status === "FAILED" ? `Rejection: ${t.notes}` : t.notes}
+                      </div>
                     )}
                   </div>
                 );
               })}
               {allClosedTrades.length >= historyLimit && (
                 <button onClick={() => setHistoryLimit(h => h + 10)}
-                  className="text-[9px] text-slate-500 hover:text-slate-300 text-center py-1.5 border border-dashed border-slate-800 rounded cursor-pointer transition-colors">
+                  className="text-[9.5px] font-bold text-slate-400 hover:text-slate-200 text-center py-1.5 border border-dashed border-slate-800 rounded cursor-pointer transition-colors">
                   Load more...
                 </button>
               )}
@@ -322,10 +598,10 @@ export default function OpenPositionsLedgerCard({
             const isCE = pos.direction === "BUY_CE";
             const inst = pos.instrument ?? activePage;
             const instrColor = inst === "NIFTY" ? "#10b981" : inst === "BANKNIFTY" ? "#8b5cf6" : "#f59e0b";
-            const pnlColor = pos.livePnl >= 0 ? "text-emerald-400" : "text-rose-500";
+            const pnlColor = pos.livePnl >= 0 ? "text-emerald-400" : "text-rose-400";
             const dirBadge = isCE
-              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
-              : "bg-red-500/10 border-red-500/20 text-red-400";
+              ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400"
+              : "bg-red-500/15 border-red-500/30 text-red-400";
 
             // Parse notes for hover tooltip
             let parsedNotes: any = null;
@@ -416,7 +692,7 @@ export default function OpenPositionsLedgerCard({
                   <div className="flex items-center gap-1.5">
                     {/* Instrument */}
                     <span
-                      className="text-[7.5px] font-black px-1 py-px rounded border uppercase"
+                      className="text-[9px] font-black px-1.5 py-0.5 rounded border uppercase"
                       style={{ color: instrColor, borderColor: `${instrColor}40`, background: `${instrColor}12` }}
                     >
                       {inst}
@@ -424,16 +700,16 @@ export default function OpenPositionsLedgerCard({
 
                     {/* PENDING badge */}
                     {isPending && (
-                      <span className="text-[7.5px] font-black px-1 py-px rounded border uppercase text-orange-400 border-orange-500/30 bg-orange-500/10 animate-pulse">
+                      <span className="text-[8.5px] font-black px-1.5 py-0.5 rounded border uppercase text-orange-400 border-orange-500/30 bg-orange-500/10 animate-pulse">
                         ⏳ PENDING
                       </span>
                     )}
 
                     {/* Direction */}
-                    <span className={`text-[9px] font-black px-1 py-px rounded border uppercase ${dirBadge}`}>
+                    <span className={`text-[10px] font-black px-1.5 py-0.5 rounded border uppercase ${dirBadge}`}>
                       {pos.direction.replace("BUY_", "")}
                     </span>
-                    <span className="font-bold text-[10px] text-slate-300">
+                    <span className="font-black text-[12px] text-white font-mono">
                       {pos.strike}
                     </span>
                   </div>
@@ -443,28 +719,28 @@ export default function OpenPositionsLedgerCard({
                     <button
                       onClick={() => handleManualClose(pos)}
                       disabled={closingId === pos.id}
-                      className={`text-[8.5px] font-black px-1.5 py-0.5 rounded border flex items-center gap-0.5 transition-all cursor-pointer ${
+                      className={`text-[9.5px] font-black px-2 py-0.5 rounded border flex items-center gap-1 transition-all cursor-pointer ${
                         closingId === pos.id
                           ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
-                          : "border-orange-500/30 bg-orange-500/5 text-orange-400 hover:bg-orange-500/20"
+                          : "border-orange-500/40 bg-orange-500/10 text-orange-400 hover:bg-orange-500/25 shadow-sm"
                       }`}
                     >
                       {closingId === pos.id
-                        ? <><RefreshCw size={7} className="animate-spin" /> …</>
+                        ? <><RefreshCw size={8} className="animate-spin" /> …</>
                         : "✕ CANCEL"}
                     </button>
                   ) : (
                     <button
                       onClick={() => handleManualClose(pos)}
                       disabled={closingId === pos.id}
-                      className={`text-[8.5px] font-black px-1.5 py-0.5 rounded border flex items-center gap-0.5 transition-all cursor-pointer ${
+                      className={`text-[9.5px] font-black px-2 py-0.5 rounded border flex items-center gap-1 transition-all cursor-pointer ${
                         closingId === pos.id
                           ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
-                          : "border-red-500/30 bg-red-500/5 text-red-400 hover:bg-red-500/20"
+                          : "border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/25 shadow-sm"
                       }`}
                     >
                       {closingId === pos.id
-                        ? <><RefreshCw size={7} className="animate-spin" /> …</>
+                        ? <><RefreshCw size={8} className="animate-spin" /> …</>
                         : "✕ CLOSE"}
                     </button>
                   )}
@@ -472,9 +748,9 @@ export default function OpenPositionsLedgerCard({
 
                 {/* Strategy row */}
                 {pos.strategyName && (
-                  <div className="text-[8px] font-black tracking-wide uppercase flex items-center gap-1 select-none mt-[-2px] mb-[1px]">
-                    <span className="text-slate-500">STRATEGY:</span>
-                    <span className="text-violet-400/90 truncate max-w-[170px]" title={pos.strategyName}>
+                  <div className="text-[9px] font-black tracking-wide uppercase flex items-center gap-1 select-none mt-[-1px] mb-[1px]">
+                    <span className="text-slate-400">STRATEGY:</span>
+                    <span className="text-violet-400 truncate max-w-[220px]" title={pos.strategyName}>
                       {pos.strategyName}
                     </span>
                   </div>
@@ -482,18 +758,20 @@ export default function OpenPositionsLedgerCard({
 
                 {/* Entry/LTP row */}
                 <div
-                  className="flex justify-between text-[9.5px] pb-1 border-b"
-                  style={{ borderColor: "rgba(255,255,255,0.06)", color: "#94a3b8" }}
+                  className="flex justify-between text-[10.5px] font-mono pb-1 border-b"
+                  style={{ borderColor: "rgba(255,255,255,0.08)", color: "#cbd5e1" }}
                 >
-                  <span>Qty: {pos.qty}×{pos.lot_size}</span>
+                  <span className="font-semibold text-slate-300">
+                    Qty: {pos.qty}{!isRealTrade && `×${pos.lot_size}`}
+                  </span>
                   {isPending ? (
                     <span>
-                      Entry Target: <span className="text-orange-400 font-bold">₹{pos.entry_price.toFixed(1)}</span>
-                      {" | "}LTP: <span className="text-blue-400 font-bold animate-pulse">₹{pos.currentPremium.toFixed(1)}</span>
+                      Entry: <span className="text-orange-400 font-black">₹{pos.entry_price.toFixed(1)}</span>
+                      {" | "}LTP: <span className="text-cyan-300 font-black animate-pulse">₹{pos.currentPremium.toFixed(1)}</span>
                     </span>
                   ) : (
                     <span>
-                      ₹{pos.entry_price.toFixed(1)} → <span className="text-blue-400 font-bold animate-pulse">₹{pos.currentPremium.toFixed(1)}</span>
+                      Entry ₹{pos.entry_price.toFixed(1)} → <span className="text-cyan-300 font-black text-[11.5px] animate-pulse drop-shadow">LTP ₹{pos.currentPremium.toFixed(1)}</span>
                     </span>
                   )}
                 </div>
@@ -510,20 +788,20 @@ export default function OpenPositionsLedgerCard({
                         }}
                       />
                     </div>
-                    <span className="text-[8px] font-black text-orange-400 whitespace-nowrap">
+                    <span className="text-[8.5px] font-black text-orange-400 whitespace-nowrap">
                       {pos.currentPremium <= pos.entry_price
                         ? `₹${(pos.entry_price - pos.currentPremium).toFixed(1)} to fill`
                         : "Above entry"}
                     </span>
                   </div>
                 ) : (
-                  <div className="space-y-0.5">
-                    <div className="flex justify-between text-[8.5px] font-bold text-slate-500 uppercase">
-                      <span>SL {pos.stop_loss.toFixed(0)}</span>
-                      <span>LTP {pos.currentPremium.toFixed(0)}</span>
-                      <span>TGT {pos.target.toFixed(0)}</span>
+                  <div className="space-y-1 pt-0.5">
+                    <div className="flex justify-between text-[9.5px] font-black font-mono text-slate-400 uppercase">
+                      <span>SL ₹{pos.stop_loss.toFixed(0)}</span>
+                      <span>LTP ₹{pos.currentPremium.toFixed(0)}</span>
+                      <span>TGT ₹{pos.target.toFixed(0)}</span>
                     </div>
-                    <div className="w-full h-[3px] rounded-full overflow-hidden" style={{ backgroundColor: "rgba(255,255,255,0.08)" }}>
+                    <div className="w-full h-[4px] rounded-full overflow-hidden" style={{ backgroundColor: "rgba(255,255,255,0.1)" }}>
                       <div
                         className="h-full rounded-full transition-all duration-300"
                         style={{ width: `${premiumRatio}%`, backgroundColor: pos.livePnl >= 0 ? "#10b981" : "#ef4444" }}
@@ -534,9 +812,9 @@ export default function OpenPositionsLedgerCard({
 
                 {/* P&L or Awaiting */}
                 {!isPending && (
-                  <div className="flex items-center justify-between pt-0.5">
-                    <span className="text-[8.5px] uppercase font-bold text-slate-500">P&L:</span>
-                    <span className={`font-black text-[11px] ${pnlColor}`}>
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[9.5px] uppercase font-black tracking-wider text-slate-400">P&L:</span>
+                    <span className={`font-black font-mono text-[14px] sm:text-[15px] tracking-tight ${pnlColor} drop-shadow-[0_0_4px_rgba(0,0,0,0.6)]`}>
                       {pos.livePnl >= 0 ? "+" : ""}₹{pos.livePnl.toLocaleString("en-IN", { maximumFractionDigits: 1 })}
                     </span>
                   </div>
@@ -545,7 +823,7 @@ export default function OpenPositionsLedgerCard({
             );
           })
         ) : (
-          <div className="text-center py-5 text-[10px] italic rounded-md border border-dashed text-slate-600 border-slate-800/40">
+          <div className="text-center py-5 text-[10.5px] italic rounded-md border border-dashed text-slate-500 border-slate-800/40">
             {filterTab === "PENDING"
               ? "No pending orders waiting to fill"
               : filterTab === "ALL"

@@ -330,7 +330,7 @@ export function useMarketSocket(activePage: "NIFTY" | "SENSEX" | "BANKNIFTY" | "
 
   // Fyers config (secret_key is server-only but the FyersIntegration form needs the field)
   const [fyersConfig, setFyersConfig] = useState({
-    app_id: "R8T7ETPIPG-100", secret_key: "", redirect_uri: "http://127.0.0.1:3000", access_token: "",
+    app_id: "H29I4RZ5R6-200", secret_key: "PSSCRk2RaK", redirect_uri: "http://127.0.0.1:3000", access_token: "",
   });
 
   // Server time & countdowns
@@ -641,11 +641,38 @@ export function useMarketSocket(activePage: "NIFTY" | "SENSEX" | "BANKNIFTY" | "
       pendingServerTimeRef.current = data.serverTime;
     });
 
+    // ── Shadow-Trade Approval Gate ─────────────────────────────────────────────
+    // Forward approval events to PendingTradeApproval component via window bridge
+    skt.on("pending-trade-approval", (approval: any) => {
+      console.log("[Socket] 🔔 New pending trade approval received:", approval);
+      const handlers = (window as any).__pendingApprovalHandlers;
+      if (handlers?.onNewPendingApproval) {
+        handlers.onNewPendingApproval(approval);
+      }
+    });
+
+    skt.on("approval-queue-update", (approvals: any[]) => {
+      console.log("[Socket] 📋 Approval queue updated:", approvals?.length, "items");
+      const handlers = (window as any).__pendingApprovalHandlers;
+      if (handlers?.onApprovalQueueUpdate) {
+        handlers.onApprovalQueueUpdate(approvals);
+      }
+    });
+
+    skt.on("real-trade-update", (data: any) => {
+      console.log("[Socket] 💹 Real trade update received");
+      const handlers = (window as any).__realTradeHandlers;
+      if (handlers?.onRealTradeUpdate) {
+        handlers.onRealTradeUpdate(data);
+      }
+    });
+
     return () => {
       skt.disconnect();
       socketRef.current = null;
     };
   }, []);
+
 
   // ── Actions ─────────────────────────────────────────────────────────────────
   const selectExpiry = useCallback((expiry: string) => {

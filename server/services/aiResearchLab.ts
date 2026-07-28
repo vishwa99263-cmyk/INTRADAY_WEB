@@ -6,25 +6,79 @@ import type { BreakoutState } from "./breakoutEngine.js";
 import type { MomentumStateResult } from "./momentumEngine.js";
 import type { SmartMoneySignal } from "./smartMoneyEngine.js";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+function getGeminiApiKeys(): string[] {
+  const envVal = process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEYS || "";
+  return envVal.split(",").map(k => k.trim().replace(/^"|"$/g, "")).filter(Boolean);
+}
+
+let currentKeyIndex = 0;
+const geminiCache = new Map<string, { timestamp: number; data: any }>();
+const CACHE_TTL_MS = 15000; // 15s cache to protect Google API 15 RPM limit
+
+let geminiCooloffUntil = 0;
 
 async function callGeminiAI(prompt: string): Promise<any> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: "application/json" }
-    })
-  });
-  if (!response.ok) {
-    throw new Error(`Gemini API error: ${response.status} ${await response.text()}`);
+  const now = Date.now();
+  if (now < geminiCooloffUntil) {
+    throw new Error("Gemini API in 60s cooldown");
   }
-  const data: any = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("Empty response from Gemini");
-  return JSON.parse(text.trim());
+
+  const cacheKey = prompt.slice(0, 120);
+  const cached = geminiCache.get(cacheKey);
+  if (cached && (now - cached.timestamp) < CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  const keys = getGeminiApiKeys();
+  if (keys.length === 0) {
+    throw new Error("No GEMINI_API_KEY configured in .env");
+  }
+
+  let lastError: Error | null = null;
+  // Try up to the total number of keys available
+  for (let i = 0; i < keys.length; i++) {
+    const keyIdx = (currentKeyIndex + i) % keys.length;
+    const apiKey = keys[keyIdx];
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json" }
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        if (response.status === 429) {
+          currentKeyIndex = (keyIdx + 1) % keys.length;
+          continue; // Try next key in pool
+        }
+        throw new Error(`Gemini API error: ${response.status} ${errorText}`);
+      }
+
+      const data: any = await response.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error("Empty response from Gemini");
+
+      // Success — update index to use this working key & cache result
+      currentKeyIndex = keyIdx;
+      const parsed = JSON.parse(text.trim());
+      geminiCache.set(cacheKey, { timestamp: now, data: parsed });
+      return parsed;
+    } catch (err: any) {
+      lastError = err;
+      if (keys.length > 1 && i < keys.length - 1) {
+        continue;
+      }
+    }
+  }
+
+  geminiCooloffUntil = Date.now() + 60000; // 60s cooldown window to stop log spam
+  throw lastError || new Error("All Gemini API keys failed.");
 }
 
 export interface AIProbabilityBreakdown {

@@ -67,6 +67,9 @@ export interface PositionTrade {
   hedged?:        boolean;
   t1Exited?:      boolean;
   expiryDate?:    string;           // ISO date string for option expiry
+  bookedPnL?:     number;           // Accumulated profit from partial exit
+  isReal?:        boolean;          // True if order executed on Fyers
+  fyersOrderId?:  string;           // Fyers Order ID tracking
   notes:          string;
   createdAt:      number;
   updatedAt:      number;
@@ -263,9 +266,22 @@ export function calcPositionSetup(
   daysToExpiry: number,
   dailyBias:    DailyBias | null,
 ): PositionTradeSetup {
-  const slPrice  = parseFloat((entryPrice * 0.50).toFixed(1));  // 50% SL
-  const target1  = parseFloat((entryPrice * 1.50).toFixed(1));  // 50% gain
-  const target2  = parseFloat((entryPrice * 2.00).toFixed(1));  // 100% gain
+  // Dynamic VIX-adaptive percentage-based SL & Target for Positional Trades
+  let slPercent = 0.45; // Default 45% SL
+  let targetPercent = 2.0; // Default +200% target points (3.0x premium)
+  
+  if (vix > 18) {
+    slPercent = 0.50; // Wider SL for high volatility
+    targetPercent = 2.5; // Bigger target for high volatility (+250% / 3.5x premium)
+  } else if (vix < 12) {
+    slPercent = 0.40; // Tighter SL for low volatility
+    targetPercent = 1.5; // Smaller target (+150% / 2.5x premium)
+  }
+
+  const slPrice  = parseFloat((entryPrice * (1 - slPercent)).toFixed(1));  // SL
+  const target2  = parseFloat((entryPrice * (1 + targetPercent)).toFixed(1));  // T2 Full
+  // Target 1: Partial exit at 70% of full target points (e.g. at VIX 15: +140% / 2.4x premium)
+  const target1  = parseFloat((entryPrice + (target2 - entryPrice) * 0.7).toFixed(1));  // T1 Partial
   const riskReward = parseFloat(((target2 - entryPrice) / (entryPrice - slPrice)).toFixed(2));
 
   const dailyTheta    = estimateDailyTheta(entryPrice, daysToExpiry, vix);
@@ -275,7 +291,7 @@ export function calcPositionSetup(
     `Strike=${strike} ${direction === "BUY_CE" ? "CE" : "PE"}`,
     `Expiry=${expiry}`,
     `Entry=₹${entryPrice}`,
-    `SL=₹${slPrice} (50%)`,
+    `SL=₹${slPrice} (${(slPercent * 100).toFixed(0)}%)`,
     `T1=₹${target1} T2=₹${target2}`,
     `R:R=${riskReward}`,
     `Theta=-₹${dailyTheta}/day`,
@@ -334,6 +350,8 @@ export function openPositionTrade(setup: PositionTradeSetup): PositionTrade {
     dailyTheta:   setup.dailyTheta,
     breakevenDays: setup.breakevenDays,
     unrealizedPnL: 0,
+    bookedPnL:    0,
+    isReal:       false,
     vixAtEntry:   setup.vixAtEntry,
     dailyBiasAtEntry: setup.dailyBiasAtEntry,
     status:       "ACTIVE",
@@ -347,6 +365,41 @@ export function openPositionTrade(setup: PositionTradeSetup): PositionTrade {
 
   console.log(`[PositionEngine] ✅ Opened: ${trade.id} | ${trade.instrument} ${trade.direction} ${trade.strike} @${trade.entryPrice}`);
   return trade;
+}
+
+/** Marks a position trade as real with the Fyers order ID. */
+export function markPositionTradeReal(id: string, fyersOrderId: string): void {
+  const trade = _trades.find(t => t.id === id);
+  if (trade) {
+    trade.isReal = true;
+    trade.fyersOrderId = fyersOrderId;
+    trade.updatedAt = Date.now();
+    savePositionTrades(_trades);
+    console.log(`[PositionEngine] Associated Fyers Order ID ${fyersOrderId} with positional trade ${id}`);
+  }
+}
+
+/** Triggers a Fyers exit order for real positional trades. Bypasses circular dependency with dynamic import. */
+async function triggerFyersPositionalExit(trade: PositionTrade, exitPrice: number, exitLots?: number) {
+  try {
+    const { executeFyersOrder } = await import("./fyersOrderBridge.js");
+    const lotsToExit = exitLots ?? trade.lots;
+    await executeFyersOrder({
+      id: trade.id,
+      instrument: trade.instrument,
+      direction: trade.direction,
+      strike: trade.strike,
+      qty: lotsToExit * trade.lotSize,
+      entry_price: trade.entryPrice,
+      exit_price: exitPrice,
+      contractSymbol: trade.optionSymbol,
+      strategyName: trade.exitReason || "AUTO_EXIT",
+      tradeType: "POSITIONAL",
+    }, "EXIT");
+    console.log(`[PositionEngine] Sent Fyers EXIT order for real trade ${trade.id} | Lots: ${lotsToExit}`);
+  } catch (err: any) {
+    console.error(`[PositionEngine] Failed to trigger Fyers exit for ${trade.id}:`, err.message);
+  }
 }
 
 /** Updates current price, trail SL, and P&L for all active trades. */
@@ -404,11 +457,23 @@ export function updatePositionPrices(
     // T1 Partial Exit — book 50% lots at Target 1
     if (currentLtp >= trade.target1 && !trade.t1Exited && trade.status === "ACTIVE") {
       trade.t1Exited = true;
+      const originalLots = trade.lots;
       trade.lots = Math.max(1, Math.floor(trade.lots / 2));
+      const closedLots = originalLots - trade.lots;
+      const partialPnL = parseFloat(
+        ((trade.target1 - trade.entryPrice) * closedLots * trade.lotSize).toFixed(0)
+      );
+      trade.bookedPnL = (trade.bookedPnL || 0) + partialPnL;
+
       trade.notes = trade.notes
-        ? trade.notes + ` | T1 HIT @ ₹${trade.currentPrice} — Partial exit (50% lots)`
-        : `T1 HIT @ ₹${trade.currentPrice} — Partial exit (50% lots)`;
-      console.log(`[POSITION] T1 partial exit for ${trade.id}`);
+        ? trade.notes + ` | T1 HIT @ ₹${trade.currentPrice} — Partial exit (${closedLots} lots, Booked: ₹${partialPnL})`
+        : `T1 HIT @ ₹${trade.currentPrice} — Partial exit (${closedLots} lots, Booked: ₹${partialPnL})`;
+      console.log(`[POSITION] T1 partial exit for ${trade.id} | Booked: ₹${partialPnL}`);
+
+      if (trade.isReal) {
+        // Trigger Fyers order exit for the closed lots portion
+        triggerFyersPositionalExit(trade, trade.target1, closedLots);
+      }
     }
 
     // Expiry Auto-Close — close trade if option has expired
@@ -417,10 +482,16 @@ export function updatePositionPrices(
       trade.exitReason = "EXPIRED";
       trade.exitPrice = trade.currentPrice;
       trade.exitTime = Date.now();
+      trade.exitDate  = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+      const remainingPnL = ((trade.currentPrice - trade.entryPrice) * trade.lots * trade.lotSize);
       trade.realizedPnL = parseFloat(
-        ((trade.currentPrice - trade.entryPrice) * trade.lots * trade.lotSize).toFixed(0)
+        ((trade.bookedPnL || 0) + remainingPnL).toFixed(0)
       );
-      console.log(`[POSITION] Auto-closed expired trade ${trade.id}`);
+      console.log(`[POSITION] Auto-closed expired trade ${trade.id} | P&L: ${trade.realizedPnL}`);
+
+      if (trade.isReal) {
+        triggerFyersPositionalExit(trade, trade.currentPrice);
+      }
     }
 
     // Bias Reversal Exit — close if market bias flipped and held ≥ 1 day
@@ -438,10 +509,16 @@ export function updatePositionPrices(
       trade.exitReason = "BIAS_REVERSAL";
       trade.exitPrice = trade.currentPrice;
       trade.exitTime = Date.now();
+      trade.exitDate  = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+      const remainingPnL = ((trade.currentPrice - trade.entryPrice) * trade.lots * trade.lotSize);
       trade.realizedPnL = parseFloat(
-        ((trade.currentPrice - trade.entryPrice) * trade.lots * trade.lotSize).toFixed(0)
+        ((trade.bookedPnL || 0) + remainingPnL).toFixed(0)
       );
-      console.log(`[POSITION] Bias reversal exit for ${trade.id} — was ${trade.dailyBiasAtEntry}, now ${currentBias}`);
+      console.log(`[POSITION] Bias reversal exit for ${trade.id} — was ${trade.dailyBiasAtEntry}, now ${currentBias} | P&L: ${trade.realizedPnL}`);
+
+      if (trade.isReal) {
+        triggerFyersPositionalExit(trade, trade.currentPrice);
+      }
     }
 
     // Auto-close: SL hit
@@ -449,11 +526,16 @@ export function updatePositionPrices(
       trade.status    = "CLOSED_LOSS";
       trade.exitPrice = currentLtp;
       trade.exitDate  = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+      const remainingPnL = ((currentLtp - trade.entryPrice) * trade.lots * trade.lotSize);
       trade.realizedPnL = parseFloat(
-        ((currentLtp - trade.entryPrice) * trade.lots * trade.lotSize).toFixed(0)
+        ((trade.bookedPnL || 0) + remainingPnL).toFixed(0)
       );
       trade.exitReason = "SL_HIT";
       console.log(`[PositionEngine] ❌ SL HIT: ${trade.id} @ ₹${currentLtp} | P&L: ${trade.realizedPnL}`);
+
+      if (trade.isReal) {
+        triggerFyersPositionalExit(trade, currentLtp);
+      }
     }
 
     // Auto-close: Target 2 hit
@@ -461,11 +543,16 @@ export function updatePositionPrices(
       trade.status    = "CLOSED_PROFIT";
       trade.exitPrice = currentLtp;
       trade.exitDate  = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+      const remainingPnL = ((currentLtp - trade.entryPrice) * trade.lots * trade.lotSize);
       trade.realizedPnL = parseFloat(
-        ((currentLtp - trade.entryPrice) * trade.lots * trade.lotSize).toFixed(0)
+        ((trade.bookedPnL || 0) + remainingPnL).toFixed(0)
       );
       trade.exitReason = "TARGET2";
       console.log(`[PositionEngine] 🎯 TARGET2 HIT: ${trade.id} @ ₹${currentLtp} | P&L: +${trade.realizedPnL}`);
+
+      if (trade.isReal) {
+        triggerFyersPositionalExit(trade, currentLtp);
+      }
     }
 
     trade.updatedAt = Date.now();
@@ -488,14 +575,20 @@ export function closePositionTrade(
   trade.status     = exitPrice >= trade.entryPrice ? "CLOSED_PROFIT" : "CLOSED_LOSS";
   trade.exitPrice  = exitPrice;
   trade.exitDate   = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+  const remainingPnL = ((exitPrice - trade.entryPrice) * trade.lots * trade.lotSize);
   trade.realizedPnL = parseFloat(
-    ((exitPrice - trade.entryPrice) * trade.lots * trade.lotSize).toFixed(0)
+    ((trade.bookedPnL || 0) + remainingPnL).toFixed(0)
   );
   trade.exitReason  = reason;
   trade.updatedAt   = Date.now();
 
   savePositionTrades(_trades);
   console.log(`[PositionEngine] 🔒 Closed: ${trade.id} @ ₹${exitPrice} | P&L: ${trade.realizedPnL} | Reason: ${reason}`);
+
+  if (trade.isReal) {
+    triggerFyersPositionalExit(trade, exitPrice);
+  }
+
   return trade;
 }
 

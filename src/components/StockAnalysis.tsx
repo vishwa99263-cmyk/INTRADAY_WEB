@@ -63,6 +63,15 @@ interface QuantInsights {
   sma5: number;
   sma10: number;
   sma20: number;
+  ema9: number;
+  ema21: number;
+  macdLine: number;
+  macdSignal: number;
+  macdHist: number;
+  bbUpper: number;
+  bbLower: number;
+  bbPctB: number;
+  atrValue: number;
   trendStatus: "Bullish" | "Bearish" | "Sideways";
   smartMoneyActivity: "High Accumulation" | "Institutional Distribution" | "Normal Consolidation" | "Institutional Sell-off" | "Retail Dominance";
   smartMoneyLabel: string;
@@ -76,13 +85,44 @@ interface QuantInsights {
   resistance90d: number;
   proximityAlerts: string[];
   flags: { type: "info" | "success" | "warning" | "danger"; text: string }[];
+  instConvictionScore: number;
+  instConvictionLabel: string;
+  volatilityRegime: "Volatility Squeeze" | "Normal Volatility" | "Volatility Expansion" | "Extreme Volatility";
+  ema9Series: number[];
+  ema21Series: number[];
+  macdLineSeries: number[];
+  macdSignalSeries: number[];
+  macdHistSeries: number[];
+  bbUpperSeries: number[];
+  bbLowerSeries: number[];
+  bbPctBSeries: number[];
+  atrSeries: number[];
 }
+
+const calcEMA = (prices: number[], period: number): number[] => {
+  const ema: number[] = [];
+  if (prices.length === 0) return ema;
+  const k = 2 / (period + 1);
+  let prevEma = prices.slice(0, period).reduce((s, p) => s + p, 0) / period;
+  for (let i = 0; i < prices.length; i++) {
+    if (i < period - 1) {
+      ema.push(prices[i]); // fallback
+    } else if (i === period - 1) {
+      ema.push(prevEma);
+    } else {
+      const currentEma = (prices[i] - prevEma) * k + prevEma;
+      ema.push(currentEma);
+      prevEma = currentEma;
+    }
+  }
+  return ema;
+};
 
 function runQuantAnalysis(history: DailyRecord[]): QuantInsights {
   const count = history.length;
   const latest = history[0];
   
-  // 1. Calculate SMA and RSI
+  // 1. Calculate SMA, EMA, MACD, BB, ATR
   // Reverse to get chronological order (oldest to latest)
   const chronological = [...history].reverse();
   const prices = chronological.map(r => r.close_price);
@@ -126,11 +166,88 @@ function runQuantAnalysis(history: DailyRecord[]): QuantInsights {
     }
   }
 
+  // EMA 9 & 21
+  const ema9 = calcEMA(prices, 9);
+  const ema21 = calcEMA(prices, 21);
+
+  // MACD (12, 26, 9)
+  const ema12 = calcEMA(prices, 12);
+  const ema26 = calcEMA(prices, 26);
+  const macdLine: number[] = [];
+  for (let i = 0; i < prices.length; i++) {
+    macdLine.push(ema12[i] - ema26[i]);
+  }
+  const macdSignal = calcEMA(macdLine, 9);
+  const macdHist: number[] = [];
+  for (let i = 0; i < prices.length; i++) {
+    macdHist.push(macdLine[i] - macdSignal[i]);
+  }
+
+  // Bollinger Bands (20, 2)
+  const bbUpper: number[] = [];
+  const bbLower: number[] = [];
+  const bbPctB: number[] = [];
+  for (let i = 0; i < prices.length; i++) {
+    if (i < 19) {
+      bbUpper.push(prices[i]);
+      bbLower.push(prices[i]);
+      bbPctB.push(0.5);
+    } else {
+      const slice = prices.slice(i - 19, i + 1);
+      const mean = slice.reduce((s, p) => s + p, 0) / 20;
+      const variance = slice.reduce((s, p) => s + Math.pow(p - mean, 2), 0) / 20;
+      const sd = Math.sqrt(variance);
+      const upper = mean + 2 * sd;
+      const lower = mean - 2 * sd;
+      const pctB = upper === lower ? 0.5 : (prices[i] - lower) / (upper - lower);
+      bbUpper.push(upper);
+      bbLower.push(lower);
+      bbPctB.push(pctB);
+    }
+  }
+
+  // ATR 14
+  const tr: number[] = [];
+  for (let i = 0; i < chronological.length; i++) {
+    const row = chronological[i];
+    if (i === 0) {
+      tr.push(row.high_price - row.low_price);
+    } else {
+      const prevClose = chronological[i - 1].close_price;
+      const t1 = row.high_price - row.low_price;
+      const t2 = Math.abs(row.high_price - prevClose);
+      const t3 = Math.abs(row.low_price - prevClose);
+      tr.push(Math.max(t1, t2, t3));
+    }
+  }
+  const atr: number[] = [];
+  let prevAtr = tr.slice(0, 14).reduce((s, v) => s + v, 0) / 14;
+  for (let i = 0; i < tr.length; i++) {
+    if (i < 13) {
+      atr.push(tr[i]);
+    } else if (i === 13) {
+      atr.push(prevAtr);
+    } else {
+      const currentAtr = (prevAtr * 13 + tr[i]) / 14;
+      atr.push(currentAtr);
+      prevAtr = currentAtr;
+    }
+  }
+
   // Back to descending order (index 0 is latest)
   const revSma5 = [...sma5].reverse();
   const revSma10 = [...sma10].reverse();
   const revSma20 = [...sma20].reverse();
   const revRsi = [...rsi].reverse();
+  const revEma9 = [...ema9].reverse();
+  const revEma21 = [...ema21].reverse();
+  const revMacdLine = [...macdLine].reverse();
+  const revMacdSignal = [...macdSignal].reverse();
+  const revMacdHist = [...macdHist].reverse();
+  const revBbUpper = [...bbUpper].reverse();
+  const revBbLower = [...bbLower].reverse();
+  const revBbPctB = [...bbPctB].reverse();
+  const revAtr = [...atr].reverse();
 
   // 2. Volume & Delivery averages (past 20 trading days)
   const slice20 = history.slice(0, Math.min(20, count));
@@ -161,6 +278,18 @@ function runQuantAnalysis(history: DailyRecord[]): QuantInsights {
   const lSma10 = revSma10[0];
   const lSma5 = revSma5[0];
   const lRsi = revRsi[0];
+  const lEma9 = revEma9[0];
+  const lEma21 = revEma21[0];
+  const pEma9 = revEma9[1] || 0;
+  const pEma21 = revEma21[1] || 0;
+  const lMacd = revMacdLine[0];
+  const lMacdSig = revMacdSignal[0];
+  const lMacdHist = revMacdHist[0];
+  const pMacdHist = revMacdHist[1] || 0;
+  const lBbUpper = revBbUpper[0];
+  const lBbLower = revBbLower[0];
+  const lBbPctB = revBbPctB[0];
+  const lAtr = revAtr[0];
 
   // Trend Scoring
   let trendStatus: "Bullish" | "Bearish" | "Sideways" = "Sideways";
@@ -181,16 +310,74 @@ function runQuantAnalysis(history: DailyRecord[]): QuantInsights {
   if (lClose > lSma10) score += 5;
   else if (lClose < lSma10) score -= 5;
 
+  // EMA Golden/Death Cross
+  if (lEma9 > lEma21) {
+    score += 5;
+    if (pEma9 <= pEma21) {
+      score += 12;
+      flags.push({ type: "success", text: `EMA Golden Cross (9/21): Short-term 9 EMA crossed above 21 EMA. Strong support-level launchpad established.` });
+    }
+  } else {
+    score -= 5;
+    if (pEma9 >= pEma21) {
+      score -= 12;
+      flags.push({ type: "danger", text: `EMA Bearish Crossover (9/21): 9 EMA crossed below 21 EMA. Short term indicators pivoting to bearish defense.` });
+    }
+  }
+
+  // MACD momentum
+  if (lMacd > lMacdSig) {
+    score += 8;
+    if (lMacdHist > pMacdHist && lMacdHist > 0 && pMacdHist <= 0) {
+      score += 12;
+      flags.push({ type: "success", text: `MACD Golden Crossover: MACD line crossed above Signal line with histogram turning positive. Momentum accelerating upwards.` });
+    }
+  } else {
+    score -= 8;
+    if (lMacdHist < pMacdHist && lMacdHist < 0 && pMacdHist >= 0) {
+      score -= 12;
+      flags.push({ type: "danger", text: `MACD Death Crossover: MACD line crossed below Signal line. Bears taking short-term control of the trend.` });
+    }
+  }
+
+  // Bollinger Bands breakout
+  if (lBbPctB >= 0.92) {
+    score += 10;
+    flags.push({ type: "success", text: `Bollinger Band Breakout: Price is hugging or trading outside the upper band (${(lBbPctB*100).toFixed(0)}%), indicating extreme bullish expansion.` });
+  } else if (lBbPctB <= 0.08) {
+    score -= 10;
+    flags.push({ type: "danger", text: `Bollinger Band Breakdown: Price is trading below or near the lower band (${(lBbPctB*100).toFixed(0)}%), indicating deep oversold panic.` });
+  }
+
+  // Bollinger Squeeze Check
+  const bbBandwidth = ((lBbUpper - lBbLower) / (lSma20 || 1)) * 100;
+  const prevBandwidths: number[] = [];
+  for (let j = 1; j < Math.min(10, revBbUpper.length); j++) {
+    prevBandwidths.push(((revBbUpper[j] - revBbLower[j]) / (revSma20[j] || 1)) * 100);
+  }
+  const avgBandwidth10d = prevBandwidths.reduce((s, v) => s + v, 0) / (prevBandwidths.length || 1);
+  let volatilityRegime: "Volatility Squeeze" | "Normal Volatility" | "Volatility Expansion" | "Extreme Volatility" = "Normal Volatility";
+  if (bbBandwidth < avgBandwidth10d * 0.75) {
+    volatilityRegime = "Volatility Squeeze";
+    score += 5;
+    flags.push({ type: "info", text: `Bollinger Squeeze detected: Bandwidth (${bbBandwidth.toFixed(1)}%) is highly compressed compared to 10d average (${avgBandwidth10d.toFixed(1)}%). Impending explosive breakout.` });
+  } else if (bbBandwidth > avgBandwidth10d * 1.4) {
+    volatilityRegime = "Extreme Volatility";
+    flags.push({ type: "warning", text: `Extreme Volatility: Bandwidth has expanded to ${bbBandwidth.toFixed(1)}% (10d avg ${avgBandwidth10d.toFixed(1)}%). Price volatility is peak-extended.` });
+  } else if (bbBandwidth > avgBandwidth10d * 1.15) {
+    volatilityRegime = "Volatility Expansion";
+  }
+
   // RSI Scoring
   let rsiStatus = "Neutral";
   if (lRsi > 70) {
     rsiStatus = "Overbought";
-    score -= 5; // potential correction risk
-    flags.push({ type: "warning", text: `RSI Overbought (${lRsi.toFixed(1)}): Price is in an overextended zone, watch for short-term exhaustion.` });
+    score -= 5;
+    flags.push({ type: "warning", text: `RSI Overbought (${lRsi.toFixed(1)}): Price is in an overextended momentum zone. Watch for buyer exhaustion.` });
   } else if (lRsi < 30) {
     rsiStatus = "Oversold";
-    score += 10; // bullish mean reversion edge
-    flags.push({ type: "success", text: `RSI Oversold (${lRsi.toFixed(1)}): High probability of a mean-reversion technical bounce.` });
+    score += 10;
+    flags.push({ type: "success", text: `RSI Oversold (${lRsi.toFixed(1)}): High probability technical mean-reversion bounce imminent.` });
   } else if (lRsi > 55) {
     rsiStatus = "Bullish Momentum";
     score += 5;
@@ -242,6 +429,29 @@ function runQuantAnalysis(history: DailyRecord[]): QuantInsights {
     smartMoneyLabel = "Low institutional presence. Mostly minor retail churn.";
   }
 
+  // Institutional Conviction Rating (ICR)
+  let convictionPoints = 0;
+  if (volRatio >= 2.0) convictionPoints += 30;
+  else if (volRatio >= 1.5) convictionPoints += 20;
+  else if (volRatio >= 1.0) convictionPoints += 10;
+
+  if (latest.delivery_percentage >= 60) convictionPoints += 30;
+  else if (latest.delivery_percentage >= 48) convictionPoints += 20;
+  else if (latest.delivery_percentage >= 35) convictionPoints += 10;
+
+  if (tradeSizeRatio >= 1.7) convictionPoints += 20;
+  else if (tradeSizeRatio >= 1.35) convictionPoints += 15;
+  else if (tradeSizeRatio >= 0.9) convictionPoints += 5;
+
+  if (isCloseUp) convictionPoints += 20;
+
+  const instConvictionScore = convictionPoints;
+  let instConvictionLabel = "Retail Churn";
+  if (instConvictionScore >= 80) instConvictionLabel = "Ultra High Institutional Conviction";
+  else if (instConvictionScore >= 60) instConvictionLabel = "Strong Institutional Accumulation";
+  else if (instConvictionScore >= 40) instConvictionLabel = "Moderate Accumulation";
+  else if (instConvictionScore >= 20) instConvictionLabel = "Neutral Trading";
+
   // Support / Resistance Proximity Alerts
   if (lClose <= support90d * 1.02) {
     proximityAlerts.push(`Price near 90d Support (₹${support90d.toFixed(2)})`);
@@ -271,7 +481,16 @@ function runQuantAnalysis(history: DailyRecord[]): QuantInsights {
     rsiStatus,
     sma5: revSma5[0],
     sma10: revSma10[0],
-    sma20: revSma20[0],
+    sma20: lSma20,
+    ema9: lEma9,
+    ema21: lEma21,
+    macdLine: lMacd,
+    macdSignal: lMacdSig,
+    macdHist: lMacdHist,
+    bbUpper: lBbUpper,
+    bbLower: lBbLower,
+    bbPctB: lBbPctB,
+    atrValue: lAtr,
     trendStatus,
     smartMoneyActivity,
     smartMoneyLabel,
@@ -284,7 +503,19 @@ function runQuantAnalysis(history: DailyRecord[]): QuantInsights {
     support90d,
     resistance90d,
     proximityAlerts,
-    flags
+    flags,
+    instConvictionScore,
+    instConvictionLabel,
+    volatilityRegime,
+    ema9Series: revEma9,
+    ema21Series: revEma21,
+    macdLineSeries: revMacdLine,
+    macdSignalSeries: revMacdSignal,
+    macdHistSeries: revMacdHist,
+    bbUpperSeries: revBbUpper,
+    bbLowerSeries: revBbLower,
+    bbPctBSeries: revBbPctB,
+    atrSeries: revAtr,
   };
 }
 
@@ -373,6 +604,10 @@ export default function StockAnalysis() {
     smPercent: 85,
     delivPer: 85,
     signal: 110,
+    ema: 110,
+    macd: 110,
+    bb: 85,
+    atr: 85,
   });
 
   const [resizingCol, setResizingCol] = useState<string | null>(null);
@@ -902,6 +1137,15 @@ export default function StockAnalysis() {
       rsiValue,
       rsiStatus,
       sma20,
+      ema9,
+      ema21,
+      macdLine,
+      macdSignal,
+      macdHist,
+      bbUpper,
+      bbLower,
+      bbPctB,
+      atrValue,
       trendStatus,
       smartMoneyActivity,
       smartMoneyLabel,
@@ -912,21 +1156,33 @@ export default function StockAnalysis() {
       volatilityDaily,
       support90d,
       resistance90d,
-      flags
+      flags,
+      instConvictionScore,
+      instConvictionLabel,
+      volatilityRegime
     } = quantInsights;
 
     // Determine color schemes
     const sentimentColor = 
-      sentimentScore >= 80 ? "text-emerald-400" :
-      sentimentScore >= 60 ? "text-teal-400" :
-      sentimentScore >= 40 ? "text-slate-350" :
-      sentimentScore >= 20 ? "text-amber-500" : "text-rose-500";
+      sentimentScore >= 80 ? "text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.35)]" :
+      sentimentScore >= 60 ? "text-teal-400 drop-shadow-[0_0_8px_rgba(45,212,191,0.35)]" :
+      sentimentScore >= 40 ? "text-slate-300" :
+      sentimentScore >= 20 ? "text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.35)]" : 
+      "text-rose-400 drop-shadow-[0_0_8px_rgba(251,113,133,0.35)]";
 
     const sentimentBg = 
-      sentimentScore >= 80 ? "bg-emerald-500/10 border-emerald-500/20" :
-      sentimentScore >= 60 ? "bg-teal-500/10 border-teal-500/20" :
-      sentimentScore >= 40 ? "bg-slate-800/40 border-slate-700/50" :
-      sentimentScore >= 20 ? "bg-amber-500/10 border-amber-500/20" : "bg-rose-500/10 border-rose-500/20";
+      sentimentScore >= 80 ? "bg-gradient-to-b from-emerald-950/25 via-slate-950/45 to-slate-950/60 border-emerald-500/25 shadow-[0_4px_24px_rgba(16,185,129,0.06)]" :
+      sentimentScore >= 60 ? "bg-gradient-to-b from-teal-950/25 via-slate-950/45 to-slate-950/60 border-teal-500/25 shadow-[0_4px_24px_rgba(20,184,166,0.06)]" :
+      sentimentScore >= 40 ? "bg-gradient-to-b from-slate-900/30 via-slate-950/45 to-slate-950/60 border-slate-800/80 shadow-none" :
+      sentimentScore >= 20 ? "bg-gradient-to-b from-amber-950/20 via-slate-950/45 to-slate-950/60 border-amber-500/25 shadow-[0_4px_24px_rgba(245,158,11,0.06)]" : 
+      "bg-gradient-to-b from-rose-950/25 via-slate-950/45 to-slate-950/60 border-rose-500/25 shadow-[0_4px_24px_rgba(244,63,94,0.06)]";
+
+    const hoverBorderClass = 
+      sentimentScore >= 80 ? "hover:border-emerald-500/35" :
+      sentimentScore >= 60 ? "hover:border-teal-500/35" :
+      sentimentScore >= 40 ? "hover:border-slate-700/60" :
+      sentimentScore >= 20 ? "hover:border-amber-500/35" : 
+      "hover:border-rose-500/35";
 
     // SVG parameters for radial gauge
     const radius = 32;
@@ -934,192 +1190,249 @@ export default function StockAnalysis() {
     const strokeDashoffset = circumference - (sentimentScore / 100) * circumference;
 
     return (
-      <div className="bg-slate-900 border border-slate-800/90 rounded-xl p-3 shadow-md flex flex-col gap-3 font-sans select-none animate-fade-in">
+      <div className="bg-slate-900/85 backdrop-blur-xl border border-slate-800/80 rounded-2xl p-5 shadow-2xl flex flex-col gap-5 select-none animate-fade-in relative overflow-hidden hover:border-indigo-500/10 transition-all duration-500">
+        
+        {/* Glow accent */}
+        <div className="absolute top-0 left-1/4 right-1/4 h-20 bg-indigo-500/5 blur-[60px] pointer-events-none rounded-full" />
         
         {/* Header bar */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-teal-500/10 rounded-lg border border-teal-500/20 text-teal-400">
-              <Sparkles size={15} className="animate-pulse" />
+        <div className="flex items-center justify-between border-b border-slate-800/60 pb-3.5 flex-wrap gap-2.5 relative z-10">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.15)]">
+              <Sparkles size={16} className="animate-pulse" />
             </div>
             <div>
-              <h3 className="text-xs font-black text-white uppercase tracking-wider">
-                AI Quantitative Insights & Analytics
+              <h3 className="text-sm font-black bg-gradient-to-r from-white via-slate-100 to-indigo-300 bg-clip-text text-transparent uppercase tracking-wider">
+                IQ200 AI Quantitative Command Center
               </h3>
-              <p className="text-[10px] text-slate-400 font-semibold leading-relaxed">
-                90-day mathematical scan of momentum, institutional deliveries, order sizes and key technical levels.
+              <p className="text-xs text-slate-400 font-medium mt-0.5 leading-normal">
+                Multi-indicator math analysis engine scanning trend, momentum, volatility squeeze, and smart money blocks.
               </p>
             </div>
           </div>
-          <span className="text-[9px] font-black px-2 py-0.5 rounded-md bg-slate-950 border border-slate-800 text-slate-400 tracking-wider">
-            QUANT ENGINE v2.0
+          <span className="text-[9.5px] font-black px-3 py-1 rounded-lg bg-gradient-to-r from-indigo-950/80 to-slate-950/80 border border-indigo-500/20 text-indigo-300 font-mono tracking-widest shadow-inner">
+            QUANT ENGINE v3.0 // IQ200
           </span>
         </div>
 
-        {/* 3-Column layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        {/* 4-Column layout */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4.5 relative z-10">
           
-          {/* Column 1: Radial Sentiment Gauge */}
-          <div className={`p-2.5 rounded-xl border ${sentimentBg} flex flex-col items-center justify-center text-center gap-2 relative overflow-hidden min-h-[165px]`}>
-            {/* Background glowing gradient */}
-            <div className="absolute inset-0 bg-radial-gradient from-transparent to-slate-950/20 opacity-30 pointer-events-none" />
+          {/* Column 1: Sentiment Gauge & conviction */}
+          <div className={`p-4 rounded-xl border ${sentimentBg} ${hoverBorderClass} flex flex-col items-center justify-between gap-3 relative overflow-hidden min-h-[235px] transition-all duration-500 hover:scale-[1.015] hover:shadow-lg`}>
+            <div className="absolute inset-0 bg-radial-gradient from-transparent to-slate-950/25 opacity-40 pointer-events-none" />
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-left w-full border-b border-slate-800/15 pb-1">Sentiment & Conviction</span>
 
-            <div className="relative flex items-center justify-center w-20 h-20">
+            <div className="relative flex items-center justify-center w-24 h-24 my-1">
               <svg className="w-full h-full transform -rotate-90">
-                {/* Track circle */}
+                <defs>
+                  <filter id="gauge-glow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feGaussianBlur stdDeviation="3.5" result="blur" />
+                    <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                  </filter>
+                </defs>
                 <circle
-                  cx="40"
-                  cy="40"
+                  cx="48"
+                  cy="48"
                   r={radius}
-                  className="stroke-slate-950 fill-transparent"
-                  strokeWidth="6"
+                  className="stroke-slate-800/40 fill-transparent"
+                  strokeWidth="7"
                 />
-                {/* Value circle */}
                 <circle
-                  cx="40"
-                  cy="40"
+                  cx="48"
+                  cy="48"
                   r={radius}
                   className="fill-transparent transition-all duration-1000 ease-out"
+                  filter="url(#gauge-glow)"
                   stroke={
-                    sentimentScore >= 60 ? "#14b8a6" : // Teal
-                    sentimentScore >= 40 ? "#64748b" : // Slate
-                    "#f43f5e" // Rose
+                    sentimentScore >= 75 ? "#34d399" : // Emerald 400
+                    sentimentScore >= 55 ? "#2dd4bf" : // Teal 400
+                    sentimentScore >= 35 ? "#64748b" : // Slate 500
+                    sentimentScore >= 20 ? "#fbbf24" : // Amber 400
+                    "#fb7185" // Rose 400
                   }
-                  strokeWidth="6"
+                  strokeWidth="7.5"
                   strokeDasharray={circumference}
                   strokeDashoffset={strokeDashoffset}
                   strokeLinecap="round"
                 />
               </svg>
-              {/* Centered stats */}
               <div className="absolute flex flex-col items-center justify-center">
-                <span className="text-lg font-black text-white font-mono">{sentimentScore}%</span>
-                <span className="text-[6.5px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Rating</span>
+                <span className="text-2xl font-black text-white font-mono tracking-tighter">{sentimentScore}%</span>
+                <span className="text-[7.5px] font-black text-slate-400 uppercase tracking-widest mt-0.5">Rating</span>
               </div>
             </div>
 
-            <div className="flex flex-col items-center">
-              <span className={`text-xs font-black tracking-wide uppercase ${sentimentColor}`}>
+            <div className="flex flex-col items-center w-full">
+              <span className={`text-xs font-black tracking-widest uppercase font-mono px-3 py-1 rounded-full bg-slate-950/60 border border-slate-850/80 shadow-md ${sentimentColor}`}>
                 {sentimentLabel}
               </span>
-              <p className="text-[8.5px] text-slate-400 mt-0.5 max-w-[200px] leading-relaxed font-semibold">
-                Sentiment rating is synthesized from trend, volume pressure, and RSI levels.
-              </p>
+              <div className="w-full mt-3 space-y-1">
+                <div className="flex justify-between items-center text-[9.5px]">
+                  <span className="text-slate-455 font-bold uppercase tracking-wider">Inst. Conviction:</span>
+                  <span className={`font-black ${
+                    instConvictionScore >= 70 ? "text-emerald-400 drop-shadow-[0_0_6px_rgba(52,211,153,0.3)]" :
+                    instConvictionScore >= 45 ? "text-teal-355 drop-shadow-[0_0_6px_rgba(45,212,191,0.3)]" : "text-amber-500"
+                  }`}>{instConvictionScore}%</span>
+                </div>
+                <div className="w-full bg-slate-950/80 h-1.5 rounded-full overflow-hidden border border-slate-900 shadow-inner">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-1000 ease-out ${
+                      instConvictionScore >= 75 ? "bg-gradient-to-r from-emerald-500 to-teal-400" :
+                      instConvictionScore >= 50 ? "bg-gradient-to-r from-teal-500 to-cyan-400" :
+                      "bg-gradient-to-r from-amber-500 to-yellow-400"
+                    }`}
+                    style={{ width: `${instConvictionScore}%` }}
+                  />
+                </div>
+                <div className={`text-[8.5px] text-center font-black uppercase tracking-wide mt-1.5 text-slate-400 font-mono`}>
+                  {instConvictionLabel}
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Column 2: 2x2 Quant Grid */}
-          <div className="grid grid-cols-2 gap-2.5">
-            {/* Trend status */}
-            <div className="p-2.5 rounded-xl bg-slate-950/50 border border-slate-800/80 flex flex-col justify-between shadow-inner">
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] font-bold text-slate-455 uppercase tracking-wider">Trend Setup</span>
-                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase ${
-                  trendStatus === "Bullish" ? "bg-emerald-500/10 text-emerald-400" :
-                  trendStatus === "Bearish" ? "bg-rose-500/10 text-rose-455" :
-                  "bg-slate-800 text-slate-400"
-                }`}>
-                  {trendStatus}
+          {/* Column 2: Advanced indicator Matrix */}
+          <div className="p-3.5 rounded-xl bg-slate-950/45 border border-slate-800/80 flex flex-col gap-2.5 min-h-[235px] hover:border-slate-700/50 transition-all duration-300 shadow-inner">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+              <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Indicator Matrix</span>
+              <span className="text-[8px] font-bold text-slate-500 bg-slate-900 border border-slate-800 px-1.5 py-0.5 rounded uppercase">4 Indicators Live</span>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-2 text-[10px]">
+              {/* EMA Indicator */}
+              <div className="p-2.5 rounded-xl bg-gradient-to-b from-slate-900/60 to-slate-950/60 border border-slate-855 flex flex-col justify-between hover:border-indigo-500/20 hover:scale-[1.02] hover:shadow-md hover:shadow-slate-950/30 transition-all duration-200 min-h-[72px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-[8.5px] font-bold text-slate-500 uppercase tracking-wider">EMA (9 / 21)</span>
+                  <TrendingUp size={11} className="text-indigo-400" />
+                </div>
+                <span className={`font-black mt-1.5 text-[11px] font-mono tracking-tight ${ema9 >= ema21 ? "text-emerald-450" : "text-rose-455"}`}>
+                  {ema9 >= ema21 ? "Golden Cross" : "Death Cross"}
+                </span>
+                <span className="text-[7.5px] text-slate-450 font-mono">
+                  Diff: {(((ema9 - ema21) / ema21) * 100).toFixed(2)}%
                 </span>
               </div>
-              <div className="mt-1.5 space-y-1">
-                <div className="flex justify-between items-center text-[10px] font-mono">
-                  <span className="text-slate-500">SMA(20)</span>
-                  <span className="font-bold text-slate-300">₹{sma20.toFixed(1)}</span>
+
+              {/* MACD Indicator */}
+              <div className="p-2.5 rounded-xl bg-gradient-to-b from-slate-900/60 to-slate-950/60 border border-slate-855 flex flex-col justify-between hover:border-cyan-500/20 hover:scale-[1.02] hover:shadow-md hover:shadow-slate-950/30 transition-all duration-200 min-h-[72px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-[8.5px] font-bold text-slate-500 uppercase tracking-wider">MACD (12/26/9)</span>
+                  <Activity size={11} className="text-cyan-400 animate-pulse" />
                 </div>
-                <p className="text-[8px] text-slate-400 font-semibold leading-relaxed">
-                  Price is trading {historyData[0].close_price >= sma20 ? "above" : "below"} SMA.
-                </p>
+                <span className={`font-black mt-1.5 text-[11px] font-mono tracking-tight ${macdHist >= 0 ? "text-emerald-455" : "text-rose-455"}`}>
+                  {macdHist >= 0 ? "Bullish Hist" : "Bearish Hist"}
+                </span>
+                <span className="text-[7.5px] text-slate-450 font-mono">
+                  Val: {macdHist.toFixed(2)}
+                </span>
+              </div>
+
+              {/* BBands */}
+              <div className="p-2.5 rounded-xl bg-gradient-to-b from-slate-900/60 to-slate-950/60 border border-slate-855 flex flex-col justify-between hover:border-teal-500/20 hover:scale-[1.02] hover:shadow-md hover:shadow-slate-950/30 transition-all duration-200 min-h-[72px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-[8.5px] font-bold text-slate-500 uppercase tracking-wider">BBands (20, 2)</span>
+                  <Layers size={11} className="text-teal-400" />
+                </div>
+                <span className={`font-black mt-1.5 text-[11px] font-mono tracking-tight ${
+                  bbPctB >= 0.9 ? "text-emerald-455" : bbPctB <= 0.1 ? "text-rose-455" : "text-slate-200"
+                }`}>
+                  %B: {(bbPctB * 100).toFixed(0)}%
+                </span>
+                <span className="text-[7.5px] text-slate-450 font-mono uppercase tracking-tighter">
+                  {volatilityRegime}
+                </span>
+              </div>
+
+              {/* Volatility ATR */}
+              <div className="p-2.5 rounded-xl bg-gradient-to-b from-slate-900/60 to-slate-950/60 border border-slate-855 flex flex-col justify-between hover:border-amber-500/20 hover:scale-[1.02] hover:shadow-md hover:shadow-slate-950/30 transition-all duration-200 min-h-[72px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-[8.5px] font-bold text-slate-500 uppercase tracking-wider">ATR Volatility</span>
+                  <Gauge size={11} className="text-amber-400" />
+                </div>
+                <span className="font-black mt-1.5 text-[11px] font-mono text-slate-200">
+                  ₹{atrValue.toFixed(1)}
+                </span>
+                <span className="text-[7.5px] text-slate-450 font-mono">
+                  Span: {volatilityDaily.toFixed(2)}% Avg
+                </span>
               </div>
             </div>
- 
-            {/* Momentum RSI */}
-            <div className="p-2.5 rounded-xl bg-slate-950/50 border border-slate-800/80 flex flex-col justify-between shadow-inner">
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] font-bold text-slate-455 uppercase tracking-wider">Momentum (RSI)</span>
-                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase ${
-                  rsiStatus === "Overbought" ? "bg-rose-500/10 text-rose-400 animate-pulse" :
-                  rsiStatus === "Oversold" ? "bg-emerald-500/10 text-emerald-400 animate-pulse" :
-                  "bg-teal-500/15 text-teal-300"
-                }`}>
-                  {rsiValue.toFixed(0)}
-                </span>
-              </div>
-              <div className="mt-1.5 space-y-1">
-                <div className="w-full bg-slate-850 h-1 rounded-full overflow-hidden relative">
-                  <div 
-                    className={`h-full rounded-full ${
-                      rsiValue > 70 ? "bg-rose-500" :
-                      rsiValue < 30 ? "bg-emerald-500" :
-                      "bg-teal-500"
-                    }`}
-                    style={{ width: `${rsiValue}%` }}
-                  />
+          </div>
+
+          {/* Column 3: Smart Money & Block Flow Analysis */}
+          <div className="p-3.5 rounded-xl bg-slate-950/45 border border-slate-800/80 flex flex-col gap-2.5 min-h-[235px] hover:border-slate-700/50 transition-all duration-300 shadow-inner">
+            <span className="text-[10px] font-black text-cyan-400 uppercase tracking-widest border-b border-slate-800 pb-1.5">Institutional Flow</span>
+            
+            <div className="flex-grow flex flex-col justify-between gap-2.5 text-[10px]">
+              <div className="grid grid-cols-2 gap-2 font-mono">
+                <div className="flex flex-col gap-1 bg-gradient-to-b from-slate-900/50 to-slate-950/50 p-2 rounded-xl border border-slate-850">
+                  <span className="text-[8px] text-slate-500 uppercase font-black">Deliv Rate</span>
+                  <span className="font-black text-[12px] text-slate-100">{historyData[0].delivery_percentage.toFixed(1)}%</span>
+                  <span className="text-[7.5px] text-slate-500 font-normal">avg {avgDeliveryPer20d.toFixed(0)}%</span>
                 </div>
-                <p className="text-[8px] text-slate-400 font-semibold leading-relaxed">
-                  RSI is {rsiStatus.toLowerCase()} (30-70).
-                </p>
-              </div>
-            </div>
- 
-            {/* Smart Money Activity */}
-            <div className="p-2.5 rounded-xl bg-slate-950/50 border border-slate-800/80 flex flex-col justify-between shadow-inner col-span-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] font-bold text-slate-455 uppercase tracking-wider">Institutional Flow</span>
-                <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase flex items-center gap-1 ${
-                  smartMoneyActivity.includes("Accumulation") ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/25" :
-                  smartMoneyActivity.includes("Distribution") || smartMoneyActivity.includes("Sell-off") ? "bg-rose-500/10 text-rose-455 border border-rose-500/25" :
-                  "bg-slate-800 text-slate-400"
-                }`}>
-                  <Zap size={10} />
-                  <span>{smartMoneyActivity}</span>
-                </span>
-              </div>
-              <div className="mt-1.5 space-y-1">
-                <div className="grid grid-cols-2 gap-2 text-[9.5px] font-mono">
-                  <div className="flex justify-between items-center bg-slate-900/40 p-0.5 rounded px-1.5 border border-slate-850">
-                    <span className="text-slate-500">Deliv %</span>
-                    <span className="font-black text-slate-300">{historyData[0].delivery_percentage.toFixed(1)}% <span className="text-[7.5px] text-slate-500 font-normal">(avg {avgDeliveryPer20d.toFixed(0)}%)</span></span>
-                  </div>
-                  <div className="flex justify-between items-center bg-slate-900/40 p-0.5 rounded px-1.5 border border-slate-850">
-                    <span className="text-slate-500">Avg Trade</span>
-                    <span className="font-black text-slate-300">{Math.round(latestTradesSize).toLocaleString("en-IN")} <span className="text-[7.5px] text-slate-500 font-normal">(avg {Math.round(avgTradesSize20d).toLocaleString("en-IN")})</span></span>
-                  </div>
+                <div className="flex flex-col gap-1 bg-gradient-to-b from-slate-900/50 to-slate-950/50 p-2 rounded-xl border border-slate-850">
+                  <span className="text-[8px] text-slate-500 uppercase font-black">Trades Size</span>
+                  <span className="font-black text-[12px] text-slate-100">{Math.round(latestTradesSize).toLocaleString("en-IN")}</span>
+                  <span className="text-[7.5px] text-slate-500 font-normal">avg {Math.round(avgTradesSize20d).toLocaleString("en-IN")}</span>
                 </div>
-                <p className="text-[8px] text-slate-400 font-semibold leading-relaxed mt-0.5">
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-gradient-to-b from-slate-900/40 to-slate-950/40 border border-slate-850 flex flex-col gap-1.5">
+                <div className="flex justify-between items-center border-b border-slate-850/40 pb-1">
+                  <span className="text-[8.5px] text-slate-500 uppercase font-black">Flow Regime</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider flex items-center gap-1.5 ${
+                    smartMoneyActivity.includes("Accumulation") ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                    smartMoneyActivity.includes("Distribution") || smartMoneyActivity.includes("Sell-off") ? "bg-rose-500/10 text-rose-455 border border-rose-500/20" :
+                    "bg-slate-800 text-slate-400 border border-slate-700/30"
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${
+                      smartMoneyActivity.includes("Accumulation") ? "bg-emerald-400 animate-pulse" :
+                      smartMoneyActivity.includes("Distribution") || smartMoneyActivity.includes("Sell-off") ? "bg-rose-500 animate-pulse" :
+                      "bg-slate-400"
+                    }`} />
+                    {smartMoneyActivity}
+                  </span>
+                </div>
+                <p className="text-[8.5px] text-slate-400 font-medium leading-relaxed font-sans">
                   {smartMoneyLabel}
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Column 3: Scanned Signals / Alerts */}
-          <div className="p-2.5 rounded-xl bg-slate-950/30 border border-slate-850/80 flex flex-col gap-1.5 min-h-[165px]">
-            <span className="text-[9px] font-bold text-slate-455 uppercase tracking-wider mb-0.5 flex items-center gap-1.5">
-              <ShieldAlert size={12} className="text-amber-500" />
-              <span>Real-Time Signals Scan ({flags.length})</span>
-            </span>
- 
-            <div className="flex-grow overflow-y-auto max-h-[120px] pr-1 space-y-1.5 custom-scrollbar">
+          {/* Column 4: AI Alert Scanner & Alerts */}
+          <div className="p-3.5 rounded-xl bg-slate-950/45 border border-slate-800/80 flex flex-col gap-2.5 min-h-[235px] hover:border-slate-700/50 transition-all duration-300 shadow-inner">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+              <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest flex items-center gap-1.5">
+                <ShieldAlert size={12} className="text-amber-500 animate-bounce" />
+                <span>Signals Scanner ({flags.length})</span>
+              </span>
+              <span className="flex items-center gap-1 text-[8.5px] text-slate-500 font-bold uppercase">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live
+              </span>
+            </div>
+
+            <div className="flex-grow overflow-y-auto max-h-[160px] pr-1 space-y-1.5 custom-scrollbar">
               {flags.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center py-4 gap-1.5">
+                <div className="h-full flex flex-col items-center justify-center text-center py-8 gap-1.5">
                   <CheckCircle size={16} className="text-slate-650" />
-                  <span className="text-[9px] text-slate-500 font-mono italic leading-relaxed uppercase">
-                    No critical breakouts or volatility spikes scanned. Stock is consolidating normally.
+                  <span className="text-[8.5px] text-slate-500 font-mono italic leading-relaxed uppercase">
+                    Consolidating normally. No breakouts or volatility shocks scanned.
                   </span>
                 </div>
               ) : (
                 flags.map((flag, idx) => {
                   const alertBg = 
-                    flag.type === "danger" ? "bg-rose-500/10 border-rose-500/25 text-rose-350" :
-                    flag.type === "success" ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-350" :
-                    flag.type === "warning" ? "bg-amber-500/10 border-amber-500/25 text-amber-350" :
-                    "bg-blue-500/10 border-blue-500/25 text-blue-350";
- 
+                    flag.type === "danger" ? "bg-rose-500/5 border-rose-500/20 text-rose-350 shadow-[0_2px_12px_rgba(244,63,94,0.02)]" :
+                    flag.type === "success" ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-350 shadow-[0_2px_12px_rgba(16,185,129,0.02)]" :
+                    flag.type === "warning" ? "bg-amber-500/5 border-amber-500/20 text-amber-350 shadow-[0_2px_12px_rgba(245,158,11,0.02)]" :
+                    "bg-blue-500/5 border-blue-500/20 text-blue-350 shadow-[0_2px_12px_rgba(59,130,246,0.02)]";
+
                   return (
                     <div 
                       key={idx} 
-                      className={`p-1.5 rounded-lg border text-[9px] font-sans font-semibold leading-relaxed flex gap-2 ${alertBg}`}
+                      className={`p-2.5 rounded-xl border text-[9.5px] font-sans font-semibold leading-relaxed flex gap-2.5 hover:scale-[1.01] transition-all duration-200 ${alertBg}`}
                     >
                       <AlertCircle size={12} className="flex-shrink-0 mt-0.5" />
                       <span>{flag.text}</span>
@@ -1133,10 +1446,10 @@ export default function StockAnalysis() {
         </div>
 
         {/* Bottom Quick-Info strip */}
-        <div className="flex flex-wrap items-center justify-between text-[9px] font-mono text-slate-500 border-t border-slate-850 pt-1.5">
-          <div className="flex gap-4">
-            <span><b>Support (90d):</b> <span className="text-rose-455">₹{support90d.toFixed(1)}</span></span>
-            <span><b>Resistance (90d):</b> <span className="text-emerald-400">₹{resistance90d.toFixed(1)}</span></span>
+        <div className="flex flex-wrap items-center justify-between text-[10px] font-mono text-slate-500 border-t border-slate-800/60 pt-2.5 relative z-10">
+          <div className="flex gap-4.5">
+            <span><b>Support (90d):</b> <span className="text-rose-455 font-bold">₹{support90d.toFixed(1)}</span></span>
+            <span><b>Resistance (90d):</b> <span className="text-emerald-400 font-bold">₹{resistance90d.toFixed(1)}</span></span>
             <span><b>90d Volatility:</b> <span className="text-slate-400">{volatilityDaily.toFixed(2)}% daily range</span></span>
           </div>
           <span>Updated: {new Date(historyData[0].trade_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
@@ -1384,11 +1697,9 @@ export default function StockAnalysis() {
             {renderQuantAnalysisDashboard()}
 
             {/* ── Table Container ── */}
-            <div className="rounded-2xl border border-slate-700/40 shadow-2xl overflow-hidden flex flex-col"
-              style={{ background: "linear-gradient(180deg,#070d1a 0%,#050a14 100%)" }}>
+            <div className="rounded-2xl border border-slate-800/80 shadow-2xl overflow-hidden flex flex-col bg-slate-950/40 backdrop-blur-md hover:border-indigo-500/10 transition-all duration-300">
               {/* Signal Filter Bar */}
-              <div className="flex items-center gap-2 p-3 border-b border-slate-800/60 flex-wrap"
-                style={{ background: "linear-gradient(90deg,#0a1020,#080d1a)" }}>
+              <div className="flex items-center gap-2 p-3 border-b border-slate-800/60 flex-wrap bg-slate-950/60 backdrop-blur-sm">
                 <span className="text-[10px] uppercase font-black text-slate-600 tracking-wider mr-2 font-sans">Filter Timeline:</span>
                 <button
                   onClick={() => setHistoryFilter("all")}
@@ -1471,7 +1782,7 @@ export default function StockAnalysis() {
                   }`}>{historyData.filter((_, idx) => getSignal(idx) === ">").length}</span>
                 </button>
               </div>
-              <div className="overflow-x-auto custom-scrollbar">
+              <div className="overflow-x-auto overflow-y-auto max-h-[600px] custom-scrollbar relative">
                 <table className="text-left border-collapse font-mono text-[13px] table-fixed w-max" style={{ width: "fit-content" }}>
                   <colgroup>
                     <col style={{ width: `${colWidths.date}px` }} />
@@ -1486,136 +1797,167 @@ export default function StockAnalysis() {
                     <col style={{ width: `${colWidths.smPercent}px` }} />
                     <col style={{ width: `${colWidths.delivPer}px` }} />
                     <col style={{ width: `${colWidths.signal}px` }} />
+                    <col style={{ width: `${colWidths.ema}px` }} />
+                    <col style={{ width: `${colWidths.macd}px` }} />
+                    <col style={{ width: `${colWidths.bb}px` }} />
+                    <col style={{ width: `${colWidths.atr}px` }} />
                     <col style={{ width: `${colWidths.volume}px` }} />
                     <col style={{ width: `${colWidths.turnover}px` }} />
                     <col style={{ width: `${colWidths.delivQty}px` }} />
                     <col style={{ width: `${colWidths.trades}px` }} />
                     <col style={{ width: `${colWidths.smartMoney}px` }} />
                   </colgroup>
-                  <thead>
-                    <tr style={{ background: "linear-gradient(90deg,#0a1120,#080e1a)" }} className="text-[11px] font-black uppercase tracking-wider select-none border-b-2 border-indigo-500/20">
-                      <th className="relative py-3 px-1 text-center border-r border-slate-800/50 text-indigo-300">
+                  <thead className="sticky top-0 z-30">
+                    <tr className="border-b border-slate-800 select-none">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-center border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         Date
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "date")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         Open
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "open")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         High
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "high")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         Low
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "low")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         Close
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "close")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         Avg Price
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "avgPrice")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         Change %
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "change")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         TTQ%
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "ttqPercent")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         DQ%
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "dqPercent")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         SM%
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "smPercent")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         Deliv %
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "delivPer")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-center border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-center border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         Signal
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "signal")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
+                        EMA(9/21)
+                        <div 
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
+                          onMouseDown={(e) => handleMouseDown(e, "ema")}
+                        />
+                      </th>
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
+                        MACD
+                        <div 
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
+                          onMouseDown={(e) => handleMouseDown(e, "macd")}
+                        />
+                      </th>
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
+                        BB %B
+                        <div 
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
+                          onMouseDown={(e) => handleMouseDown(e, "bb")}
+                        />
+                      </th>
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
+                        ATR
+                        <div 
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
+                          onMouseDown={(e) => handleMouseDown(e, "atr")}
+                        />
+                      </th>
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         Traded Qty (Lakh)
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "volume")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         Turnover (Lacs)
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "turnover")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         Deliv Qty (Lakh)
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "delivQty")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right border-r border-slate-800/80">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right border-r border-slate-900/60 text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         Trades
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "trades")}
                         />
                       </th>
-                      <th className="relative py-3 px-1 text-right">
+                      <th className="sticky top-0 bg-slate-950/95 backdrop-blur-md z-30 py-3.5 px-2 text-right text-slate-400 font-black uppercase tracking-widest text-[9.5px]">
                         Smart Money
                         <div 
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-teal-500/50 active:bg-teal-500 z-20"
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-indigo-500/40 active:bg-indigo-500 z-20"
                           onMouseDown={(e) => handleMouseDown(e, "smartMoney")}
                         />
                       </th>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/30">
+                  </thead>                  <tbody className="divide-y divide-slate-900/40">
                     {historyData
                       .map((row, originalIdx) => ({ row, originalIdx }))
                       .filter(({ originalIdx }) => {
@@ -1627,27 +1969,27 @@ export default function StockAnalysis() {
                         const changePercent = prevCloseVal > 0 ? ((row.close_price - prevCloseVal) / prevCloseVal) * 100 : 0;
                         const isPositive = row.close_price >= prevCloseVal;
                         const sig = getSignal(originalIdx);
-                        const rowBg = sig === 'STRONG ENTRY' ? 'rgba(16,185,129,0.04)'
-                          : sig === 'ENTRY'  ? 'rgba(20,184,166,0.03)'
-                          : sig === 'EARLY'  ? 'rgba(217,70,239,0.03)'
-                          : sig === 'HVD'    ? 'rgba(59,130,246,0.03)'
-                          : originalIdx % 2 === 0 ? 'rgba(255,255,255,0.01)' : 'transparent';
+                        const rowBg = sig === 'STRONG ENTRY' ? 'rgba(16,185,129,0.06)'
+                          : sig === 'ENTRY'  ? 'rgba(20,184,166,0.04)'
+                          : sig === 'EARLY'  ? 'rgba(217,70,239,0.04)'
+                          : sig === 'HVD'    ? 'rgba(59,130,246,0.04)'
+                          : originalIdx % 2 === 0 ? 'rgba(30,41,59,0.18)' : 'rgba(15,23,42,0.1)';
 
                         return (
                           <tr key={originalIdx}
                             style={{ background: rowBg }}
-                            className="hover:bg-indigo-500/5 transition-colors">
-                            <td className="py-2 px-1 text-center text-indigo-300 font-bold whitespace-nowrap overflow-hidden text-ellipsis border-r border-slate-800/40">
+                            className="hover:bg-indigo-500/10 hover:text-white transition-colors duration-150 border-b border-slate-900/60">
+                            <td className="py-2.5 px-2 text-center text-indigo-300 font-bold whitespace-nowrap overflow-hidden text-ellipsis border-r border-slate-900/50 text-[12px] font-mono">
                               {row.trade_date ? new Date(row.trade_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
                             </td>
-                            <td className="py-2 px-1 text-right text-slate-400 overflow-hidden text-ellipsis border-r border-slate-800/40">₹{row.open_price.toFixed(2)}</td>
-                            <td className="py-2 px-1 text-right text-emerald-500 font-bold overflow-hidden text-ellipsis border-r border-slate-800/40">₹{row.high_price.toFixed(2)}</td>
-                            <td className="py-2 px-1 text-right text-rose-600 font-bold overflow-hidden text-ellipsis border-r border-slate-800/40">₹{row.low_price.toFixed(2)}</td>
-                            <td className={`py-2 px-1 text-right font-black text-[13px] border-r border-slate-800/40 overflow-hidden text-ellipsis ${isPositive ? "text-emerald-300" : "text-rose-400"}`}>
+                            <td className="py-2.5 px-2 text-right text-slate-300 overflow-hidden text-ellipsis border-r border-slate-900/50 text-[12px] font-mono">₹{row.open_price.toFixed(2)}</td>
+                            <td className="py-2.5 px-2 text-right text-emerald-450 font-bold overflow-hidden text-ellipsis border-r border-slate-900/50 text-[12px] font-mono">₹{row.high_price.toFixed(2)}</td>
+                            <td className="py-2.5 px-2 text-right text-rose-500 font-bold overflow-hidden text-ellipsis border-r border-slate-900/50 text-[12px] font-mono">₹{row.low_price.toFixed(2)}</td>
+                            <td className={`py-2.5 px-2 text-right font-black text-[12.5px] border-r border-slate-900/50 overflow-hidden text-ellipsis font-mono ${isPositive ? "text-emerald-350" : "text-rose-450"}`}>
                               ₹{row.close_price.toFixed(2)}
                             </td>
-                            <td className="py-2 px-1 text-right text-sky-400/70 overflow-hidden text-ellipsis border-r border-slate-800/40">₹{row.avg_price.toFixed(2)}</td>
-                            <td className={`py-2 px-1 text-right font-bold border-r border-slate-800/40 overflow-hidden text-ellipsis ${ isPositive ? "text-emerald-400" : "text-rose-400"}`}>
+                            <td className="py-2.5 px-2 text-right text-sky-400/85 overflow-hidden text-ellipsis border-r border-slate-900/50 text-[12px] font-mono">₹{row.avg_price.toFixed(2)}</td>
+                            <td className={`py-2.5 px-2 text-right font-bold border-r border-slate-900/50 overflow-hidden text-ellipsis text-[12px] font-mono ${ isPositive ? "text-emerald-400" : "text-rose-455"}`}>
                               {isPositive ? "+" : ""}{changePercent.toFixed(2)}%
                             </td>
                             {/* TTQ% */}
@@ -1656,8 +1998,8 @@ export default function StockAnalysis() {
                               const diff = row.total_volume - avgT;
                               const val = avgT > 0 && diff > 0 ? (diff / avgT) * 100 : 0;
                               return (
-                                <td className={`py-2 px-1 text-right font-bold overflow-hidden text-ellipsis border-r border-slate-800/40 ${val > 80 ? "text-emerald-300" : val > 0 ? "text-emerald-500/70" : "text-slate-600"}`}>
-                                  {val > 0 ? `+${val.toFixed(2)}%` : <span className="text-slate-800 select-none">—</span>}
+                                <td className={`py-2.5 px-2 text-right font-bold overflow-hidden text-ellipsis border-r border-slate-900/50 text-[11.5px] font-mono ${val > 80 ? "text-emerald-300" : val > 0 ? "text-emerald-500/70" : "text-slate-555"}`}>
+                                  {val > 0 ? `+${val.toFixed(1)}%` : <span className="text-slate-700 select-none">—</span>}
                                 </td>
                               );
                             })()}
@@ -1667,8 +2009,8 @@ export default function StockAnalysis() {
                               const diff = row.delivery_volume - avgD;
                               const val = avgD > 0 && diff > 0 ? (diff / avgD) * 100 : 0;
                               return (
-                                <td className={`py-2 px-1 text-right font-bold overflow-hidden text-ellipsis border-r border-slate-800/40 ${val > 80 ? "text-cyan-300" : val > 0 ? "text-cyan-500/70" : "text-slate-600"}`}>
-                                  {val > 0 ? `+${val.toFixed(2)}%` : <span className="text-slate-800 select-none">—</span>}
+                                <td className={`py-2.5 px-2 text-right font-bold overflow-hidden text-ellipsis border-r border-slate-900/50 text-[11.5px] font-mono ${val > 80 ? "text-cyan-300" : val > 0 ? "text-cyan-500/70" : "text-slate-555"}`}>
+                                  {val > 0 ? `+${val.toFixed(1)}%` : <span className="text-slate-700 select-none">—</span>}
                                 </td>
                               );
                             })()}
@@ -1679,19 +2021,19 @@ export default function StockAnalysis() {
                               const diff = smVal - avgS;
                               const val = avgS > 0 && diff > 0 ? (diff / avgS) * 100 : 0;
                               return (
-                                <td className={`py-2 px-1 text-right font-bold overflow-hidden text-ellipsis border-r border-slate-800/40 ${val > 80 ? "text-fuchsia-300" : val > 0 ? "text-fuchsia-500/70" : "text-slate-600"}`}>
-                                  {val > 0 ? `+${val.toFixed(2)}%` : <span className="text-slate-800 select-none">—</span>}
+                                <td className={`py-2.5 px-2 text-right font-bold overflow-hidden text-ellipsis border-r border-slate-900/50 text-[11.5px] font-mono ${val > 80 ? "text-fuchsia-300" : val > 0 ? "text-fuchsia-500/70" : "text-slate-555"}`}>
+                                  {val > 0 ? `+${val.toFixed(1)}%` : <span className="text-slate-700 select-none">—</span>}
                                 </td>
                               );
                             })()}
                             {/* Deliv % */}
-                            <td className="py-2 px-1 text-right whitespace-nowrap overflow-hidden text-ellipsis border-r border-slate-800/40">
-                              <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                                row.delivery_percentage >= 60 ? "bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_6px_rgba(6,182,212,0.2)]"
+                            <td className="py-2.5 px-2 text-right whitespace-nowrap overflow-hidden text-ellipsis border-r border-slate-900/50 text-[12px] font-mono">
+                              <span className={`px-2 py-0.5 rounded-full text-[10.5px] font-bold ${
+                                row.delivery_percentage >= 60 ? "bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_6px_rgba(6,182,212,0.25)]"
                                 : row.delivery_percentage >= 40 ? "bg-blue-500/10 text-blue-300 border border-blue-500/20"
-                                : "bg-slate-900 text-slate-600"
+                                : "bg-slate-950 text-slate-500 border border-slate-900"
                               }`}>
-                                {row.delivery_percentage.toFixed(2)}%
+                                {row.delivery_percentage.toFixed(1)}%
                               </span>
                             </td>
                             {/* SIGNAL */}
@@ -1700,8 +2042,8 @@ export default function StockAnalysis() {
 
                               if (signal === "STRONG ENTRY") {
                                 return (
-                                  <td className="py-2 px-1 text-center whitespace-nowrap overflow-hidden text-ellipsis font-bold border-r border-slate-800/40">
-                                    <span className="px-2 py-0.5 rounded text-[10px] font-black bg-gradient-to-r from-emerald-500/25 to-teal-500/25 text-emerald-300 border border-emerald-450/40 animate-pulse tracking-wide shadow shadow-emerald-950/20">
+                                  <td className="py-2.5 px-2 text-center whitespace-nowrap overflow-hidden text-ellipsis font-bold border-r border-slate-900/50 text-[12px]">
+                                    <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black bg-gradient-to-r from-emerald-500/25 to-teal-500/25 text-emerald-300 border border-emerald-400/40 animate-pulse tracking-wider shadow shadow-emerald-950/20">
                                       STRONG ENTRY
                                     </span>
                                   </td>
@@ -1709,8 +2051,8 @@ export default function StockAnalysis() {
                               }
                               if (signal === "ENTRY") {
                                 return (
-                                  <td className="py-2 px-1 text-center whitespace-nowrap overflow-hidden text-ellipsis font-bold border-r border-slate-800/40">
-                                    <span className="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 animate-pulse">
+                                  <td className="py-2.5 px-2 text-center whitespace-nowrap overflow-hidden text-ellipsis font-bold border-r border-slate-900/50 text-[12px]">
+                                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 tracking-wider">
                                       ENTRY
                                     </span>
                                   </td>
@@ -1718,8 +2060,8 @@ export default function StockAnalysis() {
                               }
                               if (signal === "EARLY") {
                                 return (
-                                  <td className="py-2 px-1 text-center whitespace-nowrap overflow-hidden text-ellipsis font-bold border-r border-slate-800/40">
-                                    <span className="px-2 py-0.5 rounded text-[10px] font-black bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/25">
+                                  <td className="py-2.5 px-2 text-center whitespace-nowrap overflow-hidden text-ellipsis font-bold border-r border-slate-900/50 text-[12px]">
+                                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-fuchsia-500/15 text-fuchsia-300 border border-fuchsia-500/25 tracking-wider">
                                       EARLY
                                     </span>
                                   </td>
@@ -1727,8 +2069,8 @@ export default function StockAnalysis() {
                               }
                               if (signal === "HVD") {
                                 return (
-                                  <td className="py-2 px-1 text-center whitespace-nowrap overflow-hidden text-ellipsis font-bold border-r border-slate-800/40">
-                                    <span className="px-2 py-0.5 rounded text-[10px] font-black bg-blue-500/15 text-blue-400 border border-blue-500/25">
+                                  <td className="py-2.5 px-2 text-center whitespace-nowrap overflow-hidden text-ellipsis font-bold border-r border-slate-900/50 text-[12px]">
+                                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-blue-500/15 text-blue-400 border border-blue-500/25 tracking-wider">
                                       HVD
                                     </span>
                                   </td>
@@ -1736,35 +2078,85 @@ export default function StockAnalysis() {
                               }
                               if (signal === ">") {
                                 return (
-                                  <td className="py-2 px-1 text-center whitespace-nowrap overflow-hidden text-ellipsis font-black text-slate-400 text-sm border-r border-slate-800/40">
+                                  <td className="py-2.5 px-2 text-center whitespace-nowrap overflow-hidden text-ellipsis font-black text-slate-500 text-[13px] border-r border-slate-900/50 font-mono">
                                     &gt;
                                   </td>
                                 );
                               }
                               return (
-                                <td className="py-2 px-1 text-center whitespace-nowrap overflow-hidden text-ellipsis text-slate-600 font-normal italic border-r border-slate-800/40">
+                                <td className="py-2.5 px-2 text-center whitespace-nowrap overflow-hidden text-ellipsis text-slate-700 font-normal italic border-r border-slate-900/50 text-[12px] font-mono">
                                   —
                                 </td>
                               );
                             })()}
+                            {/* EMA 9/21 */}
+                            {(() => {
+                              if (!quantInsights) return <td className="py-2.5 px-2 text-center border-r border-slate-900/50 text-slate-700">—</td>;
+                              const e9 = quantInsights.ema9Series[originalIdx];
+                              const e21 = quantInsights.ema21Series[originalIdx];
+                              if (e9 === undefined || e21 === undefined) return <td className="py-2.5 px-2 text-center border-r border-slate-900/50 text-slate-700">—</td>;
+                              const isEmaBullish = e9 >= e21;
+                              return (
+                                <td className={`py-2.5 px-2 text-right font-semibold border-r border-slate-900/50 overflow-hidden text-ellipsis text-[12px] font-mono ${isEmaBullish ? "text-emerald-450" : "text-rose-455"}`}>
+                                  ₹{e9.toFixed(1)}/<span className="text-[10px] opacity-75">₹{e21.toFixed(1)}</span>
+                                </td>
+                              );
+                            })()}
+                            {/* MACD */}
+                            {(() => {
+                              if (!quantInsights) return <td className="py-2.5 px-2 text-center border-r border-slate-900/50 text-slate-700">—</td>;
+                              const mLine = quantInsights.macdLineSeries[originalIdx];
+                              const mHist = quantInsights.macdHistSeries[originalIdx];
+                              if (mHist === undefined) return <td className="py-2.5 px-2 text-center border-r border-slate-900/50 text-slate-700">—</td>;
+                              const isMacdBullish = mHist >= 0;
+                              return (
+                                <td className={`py-2.5 px-2 text-right font-semibold border-r border-slate-900/50 overflow-hidden text-ellipsis text-[12px] font-mono ${isMacdBullish ? "text-emerald-450" : "text-rose-455"}`}>
+                                  {mHist.toFixed(1)} <span className="text-[9px] opacity-60">({mLine.toFixed(1)})</span>
+                                </td>
+                              );
+                            })()}
+                            {/* BB %B */}
+                            {(() => {
+                              if (!quantInsights) return <td className="py-2.5 px-2 text-center border-r border-slate-900/50 text-slate-700">—</td>;
+                              const pctB = quantInsights.bbPctBSeries[originalIdx];
+                              if (pctB === undefined) return <td className="py-2.5 px-2 text-center border-r border-slate-900/50 text-slate-700">—</td>;
+                              const color = pctB >= 0.9 ? "text-emerald-350 bg-emerald-500/10 border border-emerald-500/20" : pctB <= 0.1 ? "text-rose-350 bg-rose-500/10 border border-rose-500/20" : "text-slate-400 bg-slate-950/60 border border-slate-900";
+                              return (
+                                <td className="py-2.5 px-2 text-right border-r border-slate-900/50 overflow-hidden text-ellipsis">
+                                  <span className={`px-1.5 py-0.5 rounded text-[11px] font-bold ${color}`}>
+                                    {(pctB * 100).toFixed(0)}%
+                                  </span>
+                                </td>
+                              );
+                            })()}
+                            {/* ATR */}
+                            {(() => {
+                              if (!quantInsights) return <td className="py-2.5 px-2 text-center border-r border-slate-900/50 text-slate-700">—</td>;
+                              const atrValue = quantInsights.atrSeries[originalIdx];
+                              if (atrValue === undefined) return <td className="py-2.5 px-2 text-center border-r border-slate-900/50 text-slate-700">—</td>;
+                              return (
+                                <td className="py-2.5 px-2 text-right text-slate-400 border-r border-slate-900/50 overflow-hidden text-ellipsis text-[12px] font-mono">
+                                  ₹{atrValue.toFixed(1)}
+                                </td>
+                              );
+                            })()}
                             {/* Traded Qty (Lakh) */}
-                            <td className="py-2 px-1 text-right text-violet-300 overflow-hidden text-ellipsis border-r border-slate-800/40">{(row.total_volume / 100000).toFixed(2)} L</td>
+                            <td className="py-2.5 px-2 text-right text-violet-300 font-medium overflow-hidden text-ellipsis border-r border-slate-900/50 text-[12px] font-mono">{(row.total_volume / 100000).toFixed(2)} L</td>
                             {/* Turnover (Lacs) */}
-                            <td className="py-2 px-1 text-right text-amber-300/70 overflow-hidden text-ellipsis border-r border-slate-800/40">{(row.turnover_lacs).toFixed(2)} L</td>
+                            <td className="py-2.5 px-2 text-right text-amber-400/80 font-medium overflow-hidden text-ellipsis border-r border-slate-900/50 text-[12px] font-mono">{(row.turnover_lacs).toFixed(1)} L</td>
                             {/* Deliv Qty (Lakh) */}
-                            <td className="py-2 px-1 text-right text-cyan-300/80 overflow-hidden text-ellipsis border-r border-slate-800/40">{(row.delivery_volume / 100000).toFixed(2)} L</td>
+                            <td className="py-2.5 px-2 text-right text-cyan-300 font-medium overflow-hidden text-ellipsis border-r border-slate-900/50 text-[12px] font-mono">{(row.delivery_volume / 100000).toFixed(2)} L</td>
                             {/* Trades */}
-                            <td className="py-2 px-1 text-right text-slate-400 overflow-hidden text-ellipsis border-r border-slate-800/40">
+                            <td className="py-2.5 px-2 text-right text-slate-400 font-medium overflow-hidden text-ellipsis border-r border-slate-900/50 text-[12px] font-mono">
                               {row.no_of_trades ? row.no_of_trades.toLocaleString("en-IN") : "0"}
                             </td>
                             {/* Smart Money */}
-                            <td className="py-2 px-1 text-right text-orange-300/70 overflow-hidden text-ellipsis">
-                              {row.no_of_trades > 0 ? (row.total_volume / row.no_of_trades).toFixed(2) : "0.00"}
+                            <td className="py-2.5 px-2 text-right text-orange-400 font-medium overflow-hidden text-ellipsis text-[12px] font-mono">
+                              {row.no_of_trades > 0 ? Math.round(row.total_volume / row.no_of_trades).toLocaleString("en-IN") : "0"}
                             </td>
                           </tr>
                         );
-                      })}
-                  </tbody>
+                      })}                  </tbody>
                 </table>
               </div>
             </div>

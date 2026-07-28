@@ -1,15 +1,15 @@
 @echo off
-title amex_os Stop Manager
+title INTRADAY WEB Stop Manager
 echo ==============================================
-echo       STOPPING amex_os TRADING BOT
+echo       STOPPING INTRADAY WEB TRADING BOT
 echo ==============================================
 echo.
 
-cd /d "C:\Users\gt\Music\amex_os"
+cd /d "C:\Users\gt\Music\INTRADAY WEB"
 
-echo [1/2] Stopping PM2 process: amex_os...
-call npx pm2 stop amex_os
-call npx pm2 delete amex_os >nul 2>&1
+echo [1/2] Stopping PM2 process: tradingbot...
+call npx pm2 stop tradingbot
+call npx pm2 delete tradingbot >nul 2>&1
 
 echo.
 echo [2/2] Saving PM2 state...

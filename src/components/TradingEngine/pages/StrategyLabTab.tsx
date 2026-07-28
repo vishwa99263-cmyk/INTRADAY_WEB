@@ -889,7 +889,7 @@ const StrategyLabTab: React.FC = () => {
                 { label: "Profit Factor", value: selectedRun.profit_factor, color: selectedRun.profit_factor >= 1.0 ? "text-emerald-400" : "text-rose-400" },
                 { label: "Sharpe Ratio", value: selectedRun.sharpe_ratio, color: "text-sky-400" },
                 { label: "Max Drawdown", value: `₹${Math.round(selectedRun.max_drawdown)}`, color: "text-rose-400" },
-                { label: "Risk Reward", value: `${selectedRun.avg_rr.toFixed(1)} RR`, color: "text-violet-400" },
+                { label: "Risk Reward", value: `${(Number(selectedRun.avg_rr) || 0).toFixed(1)} RR`, color: "text-violet-400" },
               ].map(s => (
                 <div key={s.label} className="bg-slate-950/60 rounded px-2 py-1.5 text-center border border-slate-800/40">
                   <div className="text-[7px] text-slate-500 uppercase font-black">{s.label}</div>

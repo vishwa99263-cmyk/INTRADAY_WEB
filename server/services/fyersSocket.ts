@@ -74,7 +74,10 @@ export function getSubscriptionSymbols(): string[] {
  * Called from optionChainStream after fetchInitialChain processes data.
  */
 export function resubscribeOptionSymbols(): void {
-  if (!activeSocket || marketState.connectionStatus !== "LIVE") return;
+  if (!activeSocket || marketState.connectionStatus !== "LIVE") {
+    console.log("[FyersSocket] Socket not in LIVE state yet — skipping dynamic subscribe until connection opens.");
+    return;
+  }
   const syms = getCleanSymbols(getOptionSymbols());
   if (syms.length === 0) {
     console.log("[FyersSocket] No active option symbols to dynamically subscribe.");

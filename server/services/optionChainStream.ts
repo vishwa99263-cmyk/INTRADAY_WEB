@@ -707,45 +707,111 @@ export function updateOptionTick(msg: any, io: SocketIOServer): boolean {
   return true;
 }
 
+
+
+
+
+
+
+// ============================================================================
+// Return all option symbols for websocket subscription
+// ============================================================================
+
 export function getOptionSymbols(): string[] {
-  const syms: string[] = [];
-  const chains = [
-    marketState.niftyOptionChain,
-    marketState.sensexOptionChain,
-    marketState.bankniftyOptionChain,
-    marketState.hdfcbankOptionChain,
-    marketState.relianceOptionChain,
-    marketState.icicibankOptionChain,
-    marketState.customStockOptionChain
-  ];
-  chains.forEach(chainState => {
-    if (chainState) {
-      chainState.strikes.forEach(row => {
-        if (row.ceSymbol) syms.push(row.ceSymbol);
-        if (row.peSymbol) syms.push(row.peSymbol);
-      });
+    const syms: string[] = [];
+
+    const chains = [
+        marketState.niftyOptionChain,
+        marketState.sensexOptionChain,
+        marketState.bankniftyOptionChain,
+        marketState.hdfcbankOptionChain,
+        marketState.relianceOptionChain,
+        marketState.icicibankOptionChain,
+        marketState.customStockOptionChain
+    ];
+
+    for (const chainState of chains) {
+        if (!chainState) continue;
+
+        for (const row of chainState.strikes) {
+            if (row.ceSymbol) syms.push(row.ceSymbol);
+            if (row.peSymbol) syms.push(row.peSymbol);
+        }
     }
-  });
 
-  // Dynamically subscribe to any open paper trade symbols (Intraday & Positional)
-  try {
-    const openTrades = getPaperTrades("OPEN");
-    openTrades.forEach(t => {
-      if (t.notes) {
-        try {
-          const parsed = JSON.parse(t.notes);
-          if (parsed && parsed.symbol) {
-            syms.push(parsed.symbol);
-          }
-        } catch (_) {}
-      }
-    });
-  } catch (e: any) {
-    console.error("[OptionChain] Error fetching open trade symbols for subscription:", e.message);
-  }
+    // Dynamically subscribe to any open paper trade symbols
+    try {
+        const openTrades = getPaperTrades("OPEN");
 
-  return syms;
+        for (const t of openTrades) {
+            if (!t.notes) continue;
+
+            try {
+                const parsed = JSON.parse(t.notes);
+
+                if (parsed?.symbol) {
+                    syms.push(parsed.symbol);
+                }
+            } catch {}
+        }
+    } catch (e: any) {
+        console.error(
+            "[OptionChain] Error fetching open trade symbols:",
+            e.message
+        );
+    }
+
+    return [...new Set(syms)];
 }
+
+// ============================================================================
+// Return ATM CE / PE symbol for trading
+// ============================================================================
+
+export function getTradableOptionSymbol(
+    index: "NIFTY" | "BANKNIFTY" | "SENSEX",
+    optionType: "CE" | "PE"
+): string | null {
+
+    const chainState =
+        index === "NIFTY"
+            ? marketState.niftyOptionChain
+            : index === "BANKNIFTY"
+            ? marketState.bankniftyOptionChain
+            : marketState.sensexOptionChain;
+
+    if (!chainState || chainState.strikes.length === 0) {
+        return null;
+    }
+
+    const spot = chainState.spotPrice;
+
+    let atmRow = chainState.strikes[0];
+    let minDiff = Number.MAX_VALUE;
+
+    for (const row of chainState.strikes) {
+
+        const diff = Math.abs(row.strikePrice - spot);
+
+        if (diff < minDiff) {
+            minDiff = diff;
+            atmRow = row;
+        }
+    }
+
+    return optionType === "CE"
+        ? atmRow.ceSymbol || null
+        : atmRow.peSymbol || null;
+}
+
+
+
+
+
+
+
+
+
 
 // ── Background calculations for next-weekly and monthly option chains ────────
 export async function fetchAndCalculateMetrics(symbol: string, expiry: string): Promise<CalculatedChainMetrics | null> {

@@ -124,6 +124,7 @@ export interface StrategyDefinition {
 
   winRateHistorical: number;             // Historical win rate %
   isActive:     boolean;                 // Enable/disable toggle
+  isSystem?:    boolean;                 // System vs custom user strategy
   fullDescription?: string;              // Detailed strategy description for UI
   entryTrigger?:    string;              // Entry trigger summary
   exitTrigger?:     string;              // Exit trigger summary

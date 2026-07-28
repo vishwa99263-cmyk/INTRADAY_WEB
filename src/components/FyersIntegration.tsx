@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { 
   ShieldCheck, AlertCircle, Check, Key, Link2, HelpCircle, 
-  Settings, Database, Play, Pause, RefreshCw, Eye, EyeOff
+  Settings, Database, Play, Pause, RefreshCw, Eye, EyeOff, Zap, Cpu, Brain
 } from "lucide-react";
 
 interface FyersConfig {
@@ -50,6 +50,47 @@ export default function FyersIntegration({
     }
   }, [fyersConfig]);
 
+  // Initialize Fyers Custom Buttons
+  useEffect(() => {
+    const initFyersButtons = () => {
+      if (typeof window !== "undefined" && (window as any).Fyers) {
+        // Buy Button
+        (window as any).Fyers.ready(function() {
+          var fyersBuy = new (window as any).Fyers(appId || "API_KEY");
+          fyersBuy.add({
+            "symbol": "NSE:RELIANCE-EQ",
+            "quantity": 4,
+            "order_type": "LIMIT",
+            "transaction_type": "BUY",
+            "product": "INTRADAY",
+            "disclosed_quantity": 0,
+            "price": 200
+          });
+          fyersBuy.link("#custom-buy-button");
+        });
+
+        // Sell Button
+        (window as any).Fyers.ready(function() {
+          var fyersSell = new (window as any).Fyers(appId || "API_KEY");
+          fyersSell.add({
+            "symbol": "NSE:RELIANCE-EQ",
+            "quantity": 1,
+            "order_type": "LIMIT",
+            "transaction_type": "SELL",
+            "product": "INTRADAY",
+            "disclosed_quantity": 0,
+            "price": 200
+          });
+          fyersSell.link("#custom-sell-button");
+        });
+      }
+    };
+
+    // If script is already loaded, init. Otherwise it might take a moment.
+    const timeout = setTimeout(initFyersButtons, 1000);
+    return () => clearTimeout(timeout);
+  }, [appId]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
@@ -75,7 +116,7 @@ export default function FyersIntegration({
     <div className="flex-1 flex flex-col p-6 overflow-auto max-w-5xl mx-auto w-full gap-6">
       
       {/* Upper Status Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         
         {/* Connection Status Card */}
         <div className={`p-5 rounded border shadow-sm flex flex-col justify-between ${
@@ -167,6 +208,37 @@ export default function FyersIntegration({
           </div>
         </div>
 
+        {/* AI & Decision Engines Status Card */}
+        <div className={`p-5 rounded border shadow-sm flex flex-col justify-between ${
+          darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
+        }`}>
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-full bg-violet-500/10 text-violet-400">
+              <Brain size={20} />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">AI Signal Engines</h3>
+              <p className="text-lg font-black tracking-tight mt-0.5 text-violet-400">
+                ACTIVE & SYNCED
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-col gap-1 text-[10.5px] font-mono">
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400 flex items-center gap-1">
+                <Cpu size={11} className="text-emerald-400" /> Antigravity Quant:
+              </span>
+              <span className="font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">ONLINE ⚡</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-400 flex items-center gap-1">
+                <Brain size={11} className="text-violet-400" /> Gemini Cloud AI:
+              </span>
+              <span className="font-bold text-violet-400 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded">ACTIVE 🧠</span>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       {/* Main Form and Instructions Dual Column */}
@@ -176,11 +248,20 @@ export default function FyersIntegration({
         <form onSubmit={handleSubmit} className={`lg:col-span-7 p-6 rounded border shadow-sm flex flex-col gap-4 ${
           darkMode ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200"
         }`}>
-          <div className="border-b dark:border-slate-800 pb-3">
-            <h2 className="text-sm font-bold tracking-tight text-emerald-650">Fyers API Credentials Configuration</h2>
-            <p className="text-xs text-slate-400 mt-1">
-              Configure your credentials and paste your updated live token to connect to real-time prices.
-            </p>
+          <div className="border-b dark:border-slate-800 pb-3 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold tracking-tight text-emerald-650">Fyers API Credentials Configuration</h2>
+              <p className="text-xs text-slate-400 mt-1">
+                Configure credentials or login via OAuth to auto-generate & stream live market data.
+              </p>
+            </div>
+            <a
+              href="/auth/fyers"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-bold flex items-center gap-1.5 transition-colors no-underline shadow-sm"
+            >
+              <Zap size={14} />
+              <span>Connect FYERS</span>
+            </a>
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -189,7 +270,7 @@ export default function FyersIntegration({
               type="text"
               value={appId}
               onChange={(e) => setAppId(e.target.value)}
-              placeholder="e.g. R8T7ETPIPG-100"
+              placeholder="e.g. H29I4RZ5R6-200"
               className={`w-full px-3 py-2 text-xs border rounded outline-none font-mono ${
                 darkMode ? "bg-slate-950 border-slate-800 text-slate-200 focus:border-emerald-500" : "bg-white border-slate-300 text-slate-800 focus:border-emerald-600"
               }`}
@@ -317,9 +398,7 @@ export default function FyersIntegration({
             </p>
           </div>
         </div>
-
       </div>
-
     </div>
   );
 }

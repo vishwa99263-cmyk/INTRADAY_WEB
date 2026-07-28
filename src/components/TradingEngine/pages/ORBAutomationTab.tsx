@@ -227,50 +227,16 @@ export const ORBAutomationTab: React.FC<ORBAutomationTabProps> = ({
               Trading Mode Control
             </h2>
 
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-mono text-slate-400">Execution Mode</span>
-                <span className={`text-[10px] font-black px-2 py-0.5 rounded tracking-wide font-mono uppercase
-                  ${state.isRealMode ? "bg-rose-500/20 text-rose-400" : "bg-emerald-500/20 text-emerald-400"}`}>
-                  {state.isRealMode ? "LIVE REAL TRADING" : "VIRTUAL PAPER MODE"}
+                <span className="text-[10px] font-black px-2 py-0.5 rounded tracking-wide font-mono uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  🟢 ALWAYS ACTIVE (VIRTUAL PAPER MODE)
                 </span>
               </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  disabled={loading}
-                  onClick={() => updateSettings({ isRealMode: false })}
-                  className={`py-2 rounded font-mono text-xs font-bold transition-all cursor-pointer border outline-none
-                    ${!state.isRealMode
-                      ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400"
-                      : "bg-[#040811] border-slate-800 text-slate-500 hover:text-slate-350"
-                    }`}
-                >
-                  PAPER MODE
-                </button>
-                <button
-                  type="button"
-                  disabled={loading}
-                  onClick={() => updateSettings({ isRealMode: true })}
-                  className={`py-2 rounded font-mono text-xs font-bold transition-all cursor-pointer border outline-none
-                    ${state.isRealMode
-                      ? "bg-rose-500/10 border-rose-500/40 text-rose-400"
-                      : "bg-[#040811] border-slate-800 text-slate-500 hover:text-slate-350"
-                    }`}
-                >
-                  LIVE FYERS
-                </button>
+              <div className="p-2.5 rounded bg-emerald-500/5 border border-emerald-500/20 text-[10px] text-emerald-400 font-mono leading-relaxed">
+                🛡️ <strong>Safety Guarantee:</strong> ORB Engine runs 100% in Virtual Paper Mode. Real money trades will NEVER be dispatched from this tab. Real trading is strictly controlled by the Position Card FYERS AUTO switch.
               </div>
-
-              {state.isRealMode && (
-                <div className="flex gap-2 p-2 rounded bg-rose-500/5 border border-rose-500/20 text-[10px] text-rose-400 font-mono">
-                  <AlertTriangle size={16} className="flex-shrink-0" />
-                  <span>
-                    <strong>Caution:</strong> Live Fyers Mode is enabled. Breakouts will place real buy and sell orders using your connected Fyers API credentials.
-                  </span>
-                </div>
-              )}
             </div>
           </div>
         </div>

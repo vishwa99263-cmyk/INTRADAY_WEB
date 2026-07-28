@@ -25,8 +25,8 @@ export default function SectorHeavyweights({ stocks, darkMode, activePage }: Sec
   const { positiveGroup, negativeGroup, uniqueHeavy } = useMemo(() => {
     const targetSymbols = ["HDFCBANK", "ICICIBANK", "RELIANCE", "BHARTIARTL"];
 
-    // ALL stocks with weightage > 3% (priority + others combined)
-    const allHeavy = stocks.filter(s => s && s.weightage > 3);
+    // ALL stocks with weightage >= 3.0% (priority + heavyweights only)
+    const allHeavy = stocks.filter(s => s && ((s.weightage || 0) >= 3.0 || targetSymbols.includes(s.symbol.toUpperCase())));
 
     // De-duplicate
     const uniqueHeavyAll: StockData[] = [];
@@ -41,7 +41,7 @@ export default function SectorHeavyweights({ stocks, darkMode, activePage }: Sec
       }
     });
 
-    // Then rest of weight > 3% stocks
+    // Then rest of weight >= 3% stocks
     allHeavy.forEach(s => {
       if (s && !seen.has(s.symbol)) {
         seen.add(s.symbol);
@@ -49,7 +49,7 @@ export default function SectorHeavyweights({ stocks, darkMode, activePage }: Sec
       }
     });
 
-    // NO filter — show ALL weight>3% stocks
+    // NO extra filter — show ONLY weight >= 3% stocks
     const filteredHeavy = uniqueHeavyAll;
 
     // Group 1: Positive Group (Sorted highest positive first)
@@ -83,22 +83,19 @@ export default function SectorHeavyweights({ stocks, darkMode, activePage }: Sec
     // BHARTIARTL gets priority (amber) styling only in SENSEX tab; plain in NIFTY tab
     const isPriority = symbolUpper === "HDFCBANK" || symbolUpper === "ICICIBANK" || symbolUpper === "RELIANCE"
       || (symbolUpper === "BHARTIARTL" && activePage === "SENSEX");
-    const pct = s.changePercent || 0;
+
+    let pct = s.changePercent;
+    if ((pct === undefined || pct === 0) && s.ltp > 0 && s.prevClose > 0) {
+      pct = ((s.ltp - s.prevClose) / s.prevClose) * 100;
+    }
+    pct = pct || 0;
     const isPos = pct >= 0;
     const formattedPct = `${isPos ? "+" : ""}${pct.toFixed(2)}%`;
-
-    // % change intensity: higher absolute value = more opaque color
-    const absVal = Math.abs(pct);
-    // Scale: 1% = min opacity, 5%+ = full opacity
-    const alpha = Math.min(1.0, 0.55 + (absVal - 1) / 4 * 0.45);
-    const bgColor = isPos
-      ? `rgba(16, 185, 129, ${alpha.toFixed(2)})`   // emerald green
-      : `rgba(239, 68, 68, ${alpha.toFixed(2)})`;   // red
 
     return (
       <div
         key={s.symbol}
-        className={`flex justify-between items-center px-2 py-[2px] rounded-lg transition-all select-none duration-200 ${
+        className={`flex items-center justify-start gap-2 px-2 py-[2px] rounded-lg transition-all select-none duration-200 ${
           darkMode
             ? "hover:bg-[#121c35]/40 text-slate-100"
             : "hover:bg-slate-100 text-slate-800"
@@ -106,49 +103,49 @@ export default function SectorHeavyweights({ stocks, darkMode, activePage }: Sec
         style={{ fontSize: `${fontSize}px` }}
       >
         {/* Stock Symbol */}
-        {isPriority ? (
-          <span className={`px-1.5 py-0 rounded font-black uppercase tracking-wider text-[11.5px] md:text-[12px] border select-text transition-all ${
-            darkMode
-              ? "bg-amber-500/10 border-amber-500/30 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.12)]"
-              : "bg-amber-100 border-amber-300 text-amber-800 shadow-sm"
-          }`}>
-            {s.symbol}
-          </span>
-        ) : (
-          <span className={`font-extrabold uppercase tracking-wider select-text ${
-            darkMode ? "text-slate-200" : "text-slate-700"
-          }`}>
-            {s.symbol}
-          </span>
-        )}
+        <div className="w-[82px] flex-shrink-0">
+          {isPriority ? (
+            <span className={`px-1.5 py-0 rounded font-black uppercase tracking-wider text-[11px] border select-text transition-all inline-block ${
+              darkMode
+                ? "bg-amber-500/10 border-amber-500/30 text-amber-300 shadow-[0_0_8px_rgba(245,158,11,0.12)]"
+                : "bg-amber-100 border-amber-300 text-amber-800 shadow-sm"
+            }`}>
+              {s.symbol}
+            </span>
+          ) : (
+            <span className={`font-extrabold uppercase tracking-wider select-text ${
+              darkMode ? "text-slate-200" : "text-slate-700"
+            }`}>
+              {s.symbol}
+            </span>
+          )}
+        </div>
 
-        {/* % Change — colored box if |%| >= 1%, plain text if < 1% */}
-        {absVal >= 1 ? (
-          <span
-            className="font-black font-mono rounded px-2 py-0.5 text-white shadow-md leading-none"
-            style={{
-              backgroundColor: bgColor,
-              fontSize: `${Math.max(fontSize, 12)}px`,
-              minWidth: "56px",
-              textAlign: "center",
-              display: "inline-block",
-              letterSpacing: "0.04em",
-              textShadow: "0 1px 3px rgba(0,0,0,0.35)"
-            }}
-          >
-            {formattedPct}
-          </span>
-        ) : (
-          <span
-            className="font-bold font-mono leading-none"
-            style={{
-              fontSize: `${Math.max(fontSize, 11)}px`,
-              color: isPos ? "#16a34a" : "#dc2626",
-            }}
-          >
-            {formattedPct}
-          </span>
-        )}
+        {/* % Change — Right next to stock name */}
+        <span
+          className={`font-black font-mono rounded px-2 py-0.5 shadow-sm leading-none transition-all ${
+            pct > 0
+              ? (darkMode 
+                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-[0_0_8px_rgba(16,185,129,0.2)]" 
+                : "bg-emerald-100 text-emerald-700 border border-emerald-300 font-extrabold")
+              : pct < 0
+              ? (darkMode 
+                ? "bg-rose-500/20 text-rose-400 border border-rose-500/40 shadow-[0_0_8px_rgba(244,63,94,0.2)]" 
+                : "bg-rose-100 text-rose-700 border border-rose-300 font-extrabold")
+              : (darkMode 
+                ? "bg-slate-800 text-slate-200 border border-slate-700" 
+                : "bg-slate-200 text-slate-800 border border-slate-300 font-bold")
+          }`}
+          style={{
+            fontSize: `${Math.max(fontSize, 11)}px`,
+            minWidth: "58px",
+            textAlign: "center",
+            display: "inline-block",
+            letterSpacing: "0.04em"
+          }}
+        >
+          {formattedPct}
+        </span>
       </div>
     );
   };

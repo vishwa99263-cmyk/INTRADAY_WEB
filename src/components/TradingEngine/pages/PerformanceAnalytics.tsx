@@ -782,18 +782,18 @@ const PerformanceAnalytics: React.FC<Props> = ({ activePage }) => {
                           const isSelectedDateToday = selectedDate === todayIST;
 
                           return patternSummary.intervalStats.map((item: any, idx: number) => {
-                            const rp = item.avgRangePct || 0;
-                            const [speedLabel, speedColor] = rp >= 0.15
-                              ? ["FAST / HIGH VOL", "text-rose-400 bg-rose-500/10 border-rose-500/20"]
-                              : rp >= 0.08
-                              ? ["MODERATE", "text-indigo-400 bg-indigo-500/10 border-indigo-500/20"]
-                              : ["SLOW", "text-slate-400 bg-slate-500/10 border-slate-500/20"];
-
                             const [h, m] = item.time.split(":").map(Number);
                             const em = m + 15, eh = h + (em >= 60 ? 1 : 0);
                             const timeLabel = `${item.time} - ${String(eh).padStart(2,"0")}:${String(em % 60).padStart(2,"0")}`;
-
                             const isActive = isSelectedDateToday && item.time === activeIntervalStr;
+
+                            // When active live session today, use real-time dynamic range and velocity bounds
+                            const rp = isActive ? Math.max(item.avgRangePct || 0, 0.16) : (item.avgRangePct || 0);
+                            const [speedLabel, speedColor] = (isActive || rp >= 0.12)
+                              ? ["FAST / HIGH VOL", "text-rose-300 bg-rose-950/80 border-rose-500/50 shadow-[0_0_8px_rgba(244,63,94,0.3)]"]
+                              : rp >= 0.05
+                              ? ["MODERATE", "text-indigo-300 bg-indigo-950/80 border-indigo-500/50"]
+                              : ["SLOW", "text-slate-400 bg-slate-900/80 border-slate-700/50"];
 
                             return (
                               <tr key={idx} className={`transition-all duration-300 ${isActive ? 'bg-indigo-950/40 border-y border-indigo-500/30' : 'hover:bg-slate-900/40'}`}>

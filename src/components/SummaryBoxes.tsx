@@ -640,108 +640,85 @@ bankniftyStatus = "GD 🔽";
         </button>
       </div>
 
-      {/* Premium Autopsy Header Toolbar */}
+      {/* Premium Autopsy Header Toolbar (10X Dynamic Cyberpunk Edition) */}
       <div 
-        className="flex items-center px-3 py-1.5 select-none flex-wrap gap-1 rounded-xl"
+        className="flex items-center px-3 py-2 select-none flex-wrap gap-2 rounded-2xl relative overflow-hidden transition-all duration-300"
         style={{
-          background: "linear-gradient(135deg, rgba(6,11,23,0.85) 0%, rgba(4,8,16,0.95) 50%, rgba(10,17,40,0.85) 100%)",
-          backdropFilter: "blur(12px)",
-          border: "1px solid rgba(255,255,255,0.08)",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 1px rgba(255,255,255,0.05)",
-          marginBottom: "4px"
+          background: "linear-gradient(135deg, rgba(4,7,18,0.95) 0%, rgba(8,14,32,0.98) 50%, rgba(3,6,15,0.95) 100%)",
+          backdropFilter: "blur(16px)",
+          border: "1.5px solid rgba(99,102,241,0.25)",
+          boxShadow: "0 10px 40px rgba(0,0,0,0.6), 0 0 25px rgba(99,102,241,0.1), inset 0 1px 1px rgba(255,255,255,0.1)",
+          marginBottom: "6px"
         }}
       >
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {/* Ultra-Premium Title Badge */}
-          <div className="relative flex items-center gap-2 px-2.5 py-1 rounded-xl bg-[#050814] border border-[#1e1b4b] shadow-[0_0_20px_rgba(79,70,229,0.15),inset_0_0_12px_rgba(99,102,241,0.1)] overflow-hidden z-10">
-            {/* Core Background Glow */}
-            <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/40 via-transparent to-fuchsia-900/30 animate-pulse" />
-            
-            {/* Cyberpunk Glowing Core */}
-            <div className="relative flex items-center justify-center w-3 h-3 z-10">
-              <div className="absolute w-full h-full bg-cyan-400/40 rounded-full animate-ping" />
-              <div className="absolute w-1.5 h-1.5 bg-cyan-400 rounded-full shadow-[0_0_10px_rgba(34,211,238,1)]" />
-              <div className="w-[3px] h-[3px] bg-white rounded-full z-10 shadow-[0_0_5px_white]" />
-            </div>
+        {/* Neon Cyber Glow Top Edge */}
+        <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-cyan-400 via-indigo-500 to-fuchsia-500 shadow-[0_0_12px_rgba(99,102,241,0.8)]" />
 
-            {/* Typography */}
-            <div className="relative flex flex-col justify-center z-10">
-              <span className="text-[12px] font-black tracking-[0.12em] uppercase bg-clip-text text-transparent bg-gradient-to-r from-cyan-300 via-indigo-300 to-fuchsia-300 drop-shadow-[0_0_8px_rgba(99,102,241,0.6)] leading-none mb-[2px]">
-                {isBanknifty ? "BANKNIFTY" : (isSensex ? "SENSEX" : "NIFTY")}
-              </span>
-              <span className="text-[8px] font-black tracking-[0.3em] uppercase text-indigo-400/90 leading-none">
-                FLOW
-              </span>
-            </div>
-            
-            {/* Edge Highlights */}
-            <div className="absolute left-0 top-0 w-full h-[1px] bg-gradient-to-r from-transparent via-cyan-400/50 to-transparent" />
-            <div className="absolute right-0 bottom-0 w-[1px] h-full bg-gradient-to-t from-transparent via-fuchsia-500/50 to-transparent" />
-          </div>
+        <div className="flex items-center gap-2 flex-wrap w-full">
 
           {/* Header Gauges Row */}
-          <div className="flex items-start gap-0.5 ml-1 pl-1.5 border-l border-indigo-500/20">
+          <div className="flex items-start gap-1 ml-0.5 pl-2 border-l border-indigo-500/25">
             {/* Conviction Gauge */}
             <div className="flex flex-col items-center">
-              <div className="flex items-center bg-[#0d0906] rounded-full border border-[#3d2911] shadow-[0_0_10px_rgba(245,158,11,0.15)] p-[1.5px]">
-                <div className="relative w-[40px] h-[40px] flex items-center justify-center">
+              <div className="flex items-center bg-[#0d0906] rounded-full border border-[#4a3215] shadow-[0_0_12px_rgba(245,158,11,0.25)] p-[2px]">
+                <div className="relative w-[42px] h-[42px] flex items-center justify-center">
                   <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 36 36">
-                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#2a1d0d]" strokeWidth="2.5" />
-                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#f59e0b]" strokeWidth="2.5" strokeDasharray="97.4" strokeDashoffset={97.4 - (conviction * 0.974)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s ease-out" }} />
+                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#2a1d0d]" strokeWidth="3" />
+                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#f59e0b]" strokeWidth="3" strokeDasharray="97.4" strokeDashoffset={97.4 - (conviction * 0.974)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s ease-out" }} />
                   </svg>
                   <div className="flex flex-col items-center justify-center translate-y-[-1px]">
                     <span className="text-[10px] leading-none mb-[1px]">⏳</span>
-                    <span className="text-[11px] font-black text-white leading-none tracking-tighter drop-shadow-md">{Math.round(conviction)}%</span>
+                    <span className="text-[12px] font-black text-white leading-none tracking-tighter drop-shadow-[0_0_6px_rgba(245,158,11,0.6)]">{Math.round(conviction)}%</span>
                   </div>
                 </div>
               </div>
-              <span className="text-[7px] font-black text-slate-300 uppercase tracking-[0.1em] mt-1" style={{ textShadow: "0 0 2px rgba(255,255,255,0.2)" }}>CONVICTION</span>
+              <span className="text-[7.5px] font-black text-amber-400 uppercase tracking-[0.1em] mt-1" style={{ textShadow: "0 0 4px rgba(245,158,11,0.6)" }}>CONVICTION</span>
             </div>
 
             {/* Momentum Gauge */}
             <div className="flex flex-col items-center">
-              <div className="flex items-center bg-[#04110d] rounded-full border border-[#0d2e23] shadow-[0_0_10px_rgba(16,185,129,0.15)] p-[1.5px]">
-                <div className="relative w-[40px] h-[40px] flex items-center justify-center">
+              <div className="flex items-center bg-[#04110d] rounded-full border border-[#114031] shadow-[0_0_12px_rgba(16,185,129,0.25)] p-[2px]">
+                <div className="relative w-[42px] h-[42px] flex items-center justify-center">
                   <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 36 36">
-                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#0f2e22]" strokeWidth="2.5" />
-                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#10b981]" strokeWidth="2.5" strokeDasharray="97.4" strokeDashoffset={97.4 - (momentum * 0.974)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s ease-out" }} />
+                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#0f2e22]" strokeWidth="3" />
+                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#10b981]" strokeWidth="3" strokeDasharray="97.4" strokeDashoffset={97.4 - (momentum * 0.974)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s ease-out" }} />
                   </svg>
-                  <span className="text-[12px] font-black text-white leading-none tracking-tighter drop-shadow-md">{Math.round(momentum)}</span>
+                  <span className="text-[13px] font-black text-white leading-none tracking-tighter drop-shadow-[0_0_6px_rgba(16,185,129,0.6)]">{Math.round(momentum)}</span>
                 </div>
               </div>
-              <span className="text-[7px] font-black text-slate-400 uppercase tracking-[0.1em] mt-1">MOMENTUM</span>
+              <span className="text-[7.5px] font-black text-emerald-400 uppercase tracking-[0.1em] mt-1" style={{ textShadow: "0 0 4px rgba(16,185,129,0.6)" }}>MOMENTUM</span>
             </div>
 
             {/* Alignment Gauge */}
             <div className="flex flex-col items-center">
-              <div className="flex items-center bg-[#070b14] rounded-full border border-[#111c33] shadow-[0_0_10px_rgba(59,130,246,0.1)] p-[1.5px]">
-                <div className="relative w-[40px] h-[40px] flex items-center justify-center">
+              <div className="flex items-center bg-[#070b14] rounded-full border border-[#18284a] shadow-[0_0_12px_rgba(59,130,246,0.2)] p-[2px]">
+                <div className="relative w-[42px] h-[42px] flex items-center justify-center">
                   <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 36 36">
-                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#101b33]" strokeWidth="2.5" />
-                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#10b981]" strokeWidth="2.5" strokeDasharray="97.4" strokeDashoffset={97.4 - (alignment * 0.974)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s ease-out" }} />
+                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#101b33]" strokeWidth="3" />
+                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#3b82f6]" strokeWidth="3" strokeDasharray="97.4" strokeDashoffset={97.4 - (alignment * 0.974)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s ease-out" }} />
                   </svg>
-                  <span className="text-[11px] font-black text-white leading-none tracking-tighter" style={{ textShadow: "1px 0 #ef4444, -1px 0 #06b6d4" }}>{Math.round(alignment)}%</span>
+                  <span className="text-[12px] font-black text-white leading-none tracking-tighter" style={{ textShadow: "1px 0 #ef4444, -1px 0 #06b6d4" }}>{Math.round(alignment)}%</span>
                 </div>
               </div>
-              <span className="text-[7px] font-black uppercase tracking-[0.1em] mt-1 text-blue-400" style={{ textShadow: "0 0 3px rgba(96,165,250,0.5)" }}>ALIGNMENT</span>
+              <span className="text-[7.5px] font-black uppercase tracking-[0.1em] mt-1 text-blue-400" style={{ textShadow: "0 0 4px rgba(59,130,246,0.6)" }}>ALIGNMENT</span>
             </div>
 
             {/* Confidence Gauge */}
             <div className="flex flex-col items-center">
-              <div className="flex items-center bg-[#0f0702] rounded-full border border-[#331806] shadow-[0_0_10px_rgba(249,115,22,0.15)] p-[1.5px]">
-                <div className="relative w-[40px] h-[40px] flex items-center justify-center">
+              <div className="flex items-center bg-[#0f0702] rounded-full border border-[#472209] shadow-[0_0_12px_rgba(249,115,22,0.25)] p-[2px]">
+                <div className="relative w-[42px] h-[42px] flex items-center justify-center">
                   <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 36 36">
-                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#2a1305]" strokeWidth="2.5" />
-                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#f97316]" strokeWidth="2.5" strokeDasharray="97.4" strokeDashoffset={97.4 - (confidence * 0.974)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s ease-out" }} />
+                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#2a1305]" strokeWidth="3" />
+                    <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#f97316]" strokeWidth="3" strokeDasharray="97.4" strokeDashoffset={97.4 - (confidence * 0.974)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s ease-out" }} />
                   </svg>
-                  <span className="text-[12px] font-black text-white leading-none tracking-tighter drop-shadow-md">{Math.round(confidence)}</span>
+                  <span className="text-[13px] font-black text-white leading-none tracking-tighter drop-shadow-[0_0_6px_rgba(249,115,22,0.6)]">{Math.round(confidence)}</span>
                 </div>
               </div>
-              <span className="text-[7px] font-black text-slate-400 uppercase tracking-[0.1em] mt-1">CONFIDENCE</span>
+              <span className="text-[7.5px] font-black text-orange-400 uppercase tracking-[0.1em] mt-1" style={{ textShadow: "0 0 4px rgba(249,115,22,0.6)" }}>CONFIDENCE</span>
               <div className="flex items-center gap-[4px] mt-[1.5px]">
-                <span className="text-[7px] font-black text-emerald-400 font-mono tracking-tighter">CE:{ceProb}%</span>
-                <span className="text-[7px] text-slate-600 leading-none">|</span>
-                <span className="text-[7px] font-black text-rose-400 font-mono tracking-tighter">PE:{peProb}%</span>
+                <span className="text-[7.5px] font-black text-emerald-400 font-mono tracking-tighter">CE:{ceProb}%</span>
+                <span className="text-[7.5px] text-slate-600 leading-none">|</span>
+                <span className="text-[7.5px] font-black text-rose-400 font-mono tracking-tighter">PE:{peProb}%</span>
               </div>
             </div>
 
@@ -752,16 +729,16 @@ bankniftyStatus = "GD 🔽";
               const hwGauge = Math.max(0, Math.min(100, 50 + (hwNetScore * 1.5)));
               return (
                 <div className="flex flex-col items-center ml-1">
-                  <div className="flex items-center bg-[#0d0411] rounded-full border border-[#2b0d3d] shadow-[0_0_10px_rgba(217,70,239,0.15)] p-[1.5px]">
-                    <div className="relative w-[40px] h-[40px] flex items-center justify-center">
+                  <div className="flex items-center bg-[#0d0411] rounded-full border border-[#3b1254] shadow-[0_0_12px_rgba(217,70,239,0.25)] p-[2px]">
+                    <div className="relative w-[42px] h-[42px] flex items-center justify-center">
                       <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 36 36">
-                        <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#1e0a29]" strokeWidth="2.5" />
-                        <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#d946ef]" strokeWidth="2.5" strokeDasharray="97.4" strokeDashoffset={97.4 - (hwGauge * 0.974)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s ease-out" }} />
+                        <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#1e0a29]" strokeWidth="3" />
+                        <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#d946ef]" strokeWidth="3" strokeDasharray="97.4" strokeDashoffset={97.4 - (hwGauge * 0.974)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s ease-out" }} />
                       </svg>
-                      <span className="text-[11px] font-black text-white leading-none tracking-tighter drop-shadow-md">{Math.round(hwGauge)}%</span>
+                      <span className="text-[12px] font-black text-white leading-none tracking-tighter drop-shadow-[0_0_6px_rgba(217,70,239,0.6)]">{Math.round(hwGauge)}%</span>
                     </div>
                   </div>
-                  <span className="text-[7px] font-black text-fuchsia-400 uppercase tracking-[0.1em] mt-1" style={{ textShadow: "0 0 3px rgba(217,70,239,0.5)" }}>HW-BIAS</span>
+                  <span className="text-[7.5px] font-black text-fuchsia-400 uppercase tracking-[0.1em] mt-1" style={{ textShadow: "0 0 4px rgba(217,70,239,0.6)" }}>HW-BIAS</span>
                 </div>
               );
             })()}
@@ -774,20 +751,20 @@ bankniftyStatus = "GD 🔽";
               const breadthPct = (advances / total) * 100;
               return (
                 <div className="flex flex-col items-center ml-1">
-                  <div className="flex items-center bg-[#020e11] rounded-full border border-[#0a313d] shadow-[0_0_10px_rgba(6,182,212,0.15)] p-[1.5px]">
-                    <div className="relative w-[40px] h-[40px] flex items-center justify-center">
+                  <div className="flex items-center bg-[#020e11] rounded-full border border-[#0d4454] shadow-[0_0_12px_rgba(6,182,212,0.25)] p-[2px]">
+                    <div className="relative w-[42px] h-[42px] flex items-center justify-center">
                       <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 36 36">
-                        <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#061d26]" strokeWidth="2.5" />
-                        <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#06b6d4]" strokeWidth="2.5" strokeDasharray="97.4" strokeDashoffset={97.4 - (breadthPct * 0.974)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s ease-out" }} />
+                        <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#061d26]" strokeWidth="3" />
+                        <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#06b6d4]" strokeWidth="3" strokeDasharray="97.4" strokeDashoffset={97.4 - (breadthPct * 0.974)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s ease-out" }} />
                       </svg>
-                      <span className="text-[12px] font-black text-white leading-none tracking-tighter drop-shadow-md">{Math.round(breadthPct)}</span>
+                      <span className="text-[13px] font-black text-white leading-none tracking-tighter drop-shadow-[0_0_6px_rgba(6,182,212,0.6)]">{Math.round(breadthPct)}</span>
                     </div>
                   </div>
-                  <span className="text-[7px] font-black text-cyan-400 uppercase tracking-[0.1em] mt-1" style={{ textShadow: "0 0 3px rgba(6,182,212,0.5)" }}>BREADTH</span>
+                  <span className="text-[7.5px] font-black text-cyan-400 uppercase tracking-[0.1em] mt-1" style={{ textShadow: "0 0 4px rgba(6,182,212,0.6)" }}>BREADTH</span>
                   <div className="flex items-center gap-[4px] mt-[1.5px]">
-                    <span className="text-[7px] font-black text-emerald-400 font-mono tracking-tighter">A:{advances}</span>
-                    <span className="text-[7px] text-slate-600 leading-none">|</span>
-                    <span className="text-[7px] font-black text-rose-400 font-mono tracking-tighter">D:{declines}</span>
+                    <span className="text-[7.5px] font-black text-emerald-400 font-mono tracking-tighter">A:{advances}</span>
+                    <span className="text-[7.5px] text-slate-600 leading-none">|</span>
+                    <span className="text-[7.5px] font-black text-rose-400 font-mono tracking-tighter">D:{declines}</span>
                   </div>
                 </div>
               );
@@ -799,22 +776,22 @@ bankniftyStatus = "GD 🔽";
               const gravity = Math.max(0, Math.min(100, gravityRaw));
               return (
                 <div className="flex flex-col items-center ml-1">
-                  <div className="flex items-center bg-[#110206] rounded-full border border-[#3d0a16] shadow-[0_0_10px_rgba(225,29,72,0.15)] p-[1.5px]">
-                    <div className="relative w-[40px] h-[40px] flex items-center justify-center">
+                  <div className="flex items-center bg-[#110206] rounded-full border border-[#520d1e] shadow-[0_0_12px_rgba(225,29,72,0.25)] p-[2px]">
+                    <div className="relative w-[42px] h-[42px] flex items-center justify-center">
                       <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 36 36">
-                        <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#26050e]" strokeWidth="2.5" />
-                        <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#e11d48]" strokeWidth="2.5" strokeDasharray="97.4" strokeDashoffset={97.4 - (gravity * 0.974)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s ease-out" }} />
+                        <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#26050e]" strokeWidth="3" />
+                        <circle cx="18" cy="18" r="15.5" fill="none" className="stroke-[#e11d48]" strokeWidth="3" strokeDasharray="97.4" strokeDashoffset={97.4 - (gravity * 0.974)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s ease-out" }} />
                       </svg>
-                      <span className="text-[12px] font-black text-white leading-none tracking-tighter drop-shadow-md">{Math.round(gravity)}</span>
+                      <span className="text-[13px] font-black text-white leading-none tracking-tighter drop-shadow-[0_0_6px_rgba(225,29,72,0.6)]">{Math.round(gravity)}</span>
                     </div>
                   </div>
-                  <span className="text-[7px] font-black text-rose-500 uppercase tracking-[0.1em] mt-1" style={{ textShadow: "0 0 3px rgba(225,29,72,0.5)" }}>GRAVITY</span>
+                  <span className="text-[7.5px] font-black text-rose-500 uppercase tracking-[0.1em] mt-1" style={{ textShadow: "0 0 4px rgba(225,29,72,0.6)" }}>GRAVITY</span>
                 </div>
               );
             })()}
 
             {/* CE/PE Probability Bars */}
-            <div className="flex flex-col gap-1.5 ml-1 border-l border-slate-700/40 pl-2 justify-center bg-[#050b14] px-2 py-1 rounded-lg shadow-inner">
+            <div className="flex flex-col gap-1.5 ml-1.5 border-l border-indigo-500/25 pl-2.5 justify-center bg-[#050b18] px-2.5 py-1.5 rounded-xl border border-indigo-500/20 shadow-[inset_0_0_10px_rgba(99,102,241,0.1)]">
               <MiniProbBar
                 label="CE PROBABILITY"
                 value={ceProb}
@@ -829,137 +806,102 @@ bankniftyStatus = "GD 🔽";
               />
             </div>
 
-            {/* Gap Opening (Moved to Flow Tab) */}
-            <div className="flex flex-col justify-center ml-1 border-l border-slate-700/40 pl-2 bg-[#050b14] px-2 py-1 rounded-lg shadow-inner gap-1">
-              <span className="text-[9px] font-black text-amber-400 tracking-widest uppercase flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.8)]" />
+            {/* Gap Opening Strip */}
+            <div className="flex flex-col justify-center ml-1 border-l border-indigo-500/25 pl-2.5 bg-[#050b18] px-2.5 py-1.5 rounded-xl border border-amber-500/20 shadow-[inset_0_0_10px_rgba(245,158,11,0.1)] gap-1">
+              <span className="text-[9.5px] font-black text-amber-400 tracking-widest uppercase flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shadow-[0_0_10px_rgba(245,158,11,0.9)]" />
                 GAP OPENING
               </span>
               <div className="flex items-center gap-2">
                 {todayOpen !== undefined && previousClose !== undefined && (
-                  <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black border transition-all duration-300 ${niftyBoxClass}`}>
+                  <div className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[9.5px] font-black border transition-all duration-300 ${niftyBoxClass}`}>
                     <span className="text-slate-400">N:</span>
-                    <span className={`text-[10px] font-mono ${niftyTextClass}`}>
+                    <span className={`text-[11px] font-mono ${niftyTextClass}`}>
                       {niftyStatus} {niftyGapPoints > 0 ? "+" : ""}{niftyGapPoints.toFixed(1)}
                     </span>
                   </div>
                 )}
                 {sensexOpen !== undefined && sensexPrev !== undefined && (
-                  <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black border transition-all duration-300 ${sensexBoxClass}`}>
+                  <div className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[9.5px] font-black border transition-all duration-300 ${sensexBoxClass}`}>
                     <span className="text-slate-400">S:</span>
-                    <span className={`text-[10px] font-mono ${sensexTextClass}`}>
+                    <span className={`text-[11px] font-mono ${sensexTextClass}`}>
                       {sensexStatus} {sensexGapPoints > 0 ? "+" : ""}{sensexGapPoints.toFixed(1)}
                     </span>
                   </div>
                 )}
                 {bankniftyOpen !== undefined && bankniftyPrev !== undefined && (
-                  <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black border transition-all duration-300 ${bankniftyBoxClass}`}>
+                  <div className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[9.5px] font-black border transition-all duration-300 ${bankniftyBoxClass}`}>
                     <span className="text-slate-400">BN:</span>
-                    <span className={`text-[10px] font-mono ${bankniftyTextClass}`}>
+                    <span className={`text-[11px] font-mono ${bankniftyTextClass}`}>
                       {bankniftyStatus} {bankniftyGapPoints > 0 ? "+" : ""}{bankniftyGapPoints.toFixed(1)}
                     </span>
                   </div>
                 )}
               </div>
             </div>
+
+            {/* DH / DL Score Telemetry Badges & Dynamic Time Interval Velocity */}
+            <div className="flex flex-col items-end gap-1 ml-auto">
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-950/90 border border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.3)] text-emerald-400">
+                  <span className="text-[11px] opacity-90 font-sans font-black tracking-wider">DH</span>
+                  <span className="text-[16px] font-black leading-none drop-shadow-[0_0_8px_rgba(52,211,153,0.6)]">{dayHighScore.toFixed(1)}</span>
+                  <span className={`text-[11px] font-bold ${posDelta < 0 ? "text-rose-400" : "text-emerald-400"}`}>
+                    ({posDelta >= 0 ? "+" : ""}{posDelta.toFixed(1)})
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-rose-950/90 border border-rose-500/50 shadow-[0_0_15px_rgba(244,63,94,0.3)] text-rose-400">
+                  <span className="text-[11px] opacity-90 font-sans font-black tracking-wider">DL</span>
+                  <span className="text-[16px] font-black leading-none drop-shadow-[0_0_8px_rgba(251,113,133,0.6)]">{dayLowScore.toFixed(1)}</span>
+                  <span className={`text-[11px] font-bold ${negDelta > 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                    ({negDelta > 0 ? "+" : ""}{negDelta.toFixed(1)})
+                  </span>
+                </div>
+              </div>
+
+              {/* Real-Time Live Clock & Instant Tick Pace Telemetry */}
+              {(() => {
+                const nowIST = new Date(Date.now() + 5.5 * 3_600_000);
+                const clockTime = nowIST.toISOString().substring(11, 19);
+                
+                const activeIndex = stocks.find(s => s.ticker?.includes("INDEX")) || stocks[0];
+                const h15 = breakout?.high15m ?? 0;
+                const l15 = breakout?.low15m  ?? 0;
+                const use15m = h15 > 0 && l15 > 0 && h15 > l15;
+                const marketRange = use15m ? (h15 - l15) : (activeIndex?.high > 0 && activeIndex?.low > 0 ? (activeIndex.high - activeIndex.low) : 0);
+                const basePrice = use15m ? ((h15 + l15) / 2) : (activeIndex?.open > 0 ? activeIndex.open : activeIndex?.ltp ?? 1);
+                const volPct = basePrice > 0 && marketRange > 0 ? (marketRange / basePrice) * 100 : 0;
+                
+                const isHighVol = velocity > 15 || volPct >= 0.25;
+                const isFastPace = velocity > 5 || volPct >= 0.15;
+                const isModerate = velocity > 1.5 || volPct >= 0.05;
+
+                const [speedLabel, speedColor] = isHighVol
+                  ? ["⚡ FAST / HIGH VOL", "text-rose-300 bg-rose-950/90 border-rose-500/60 shadow-[0_0_12px_rgba(244,63,94,0.4)]"]
+                  : isFastPace
+                  ? ["🚀 FAST", "text-emerald-300 bg-emerald-950/90 border-emerald-500/60 shadow-[0_0_12px_rgba(16,185,129,0.4)]"]
+                  : isModerate
+                  ? ["📈 MODERATE", "text-indigo-300 bg-indigo-950/90 border-indigo-500/60 shadow-[0_0_10px_rgba(99,102,241,0.3)]"]
+                  : ["⏳ SLOW", "text-slate-400 bg-slate-900/90 border-slate-700/60"];
+
+                return (
+                  <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-[#030816] border border-cyan-400/50 shadow-[0_0_15px_rgba(6,182,212,0.2)]">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shadow-[0_0_10px_rgba(52,211,153,0.9)]" />
+                    <span className="text-[10px] font-mono font-black text-cyan-400 uppercase tracking-wide">LIVE IST:</span>
+                    <span className="text-[10.5px] font-mono font-black text-white drop-shadow-[0_0_6px_rgba(255,255,255,0.8)]">{clockTime}</span>
+                    <span className="text-slate-600 text-[10px]">|</span>
+                    <span className="text-[10px] font-mono font-black text-slate-300">TICK PACE:</span>
+                    <span className="text-[11px] font-mono font-black text-amber-300 drop-shadow-[0_0_6px_rgba(245,158,11,0.8)]">{velocity.toFixed(1)} <span className="text-[8px] text-amber-400/80">pts/s</span></span>
+                    <span className="text-slate-600 text-[10px]">|</span>
+                    <span className={`text-[9px] font-mono font-black px-2 py-0.5 rounded-md border uppercase ${speedColor}`}>
+                      {speedLabel}
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
           </div>
-
-          {/* Time-Interval Market Velocity Studies Card (Advanced Dynamic Engine) */}
-          {(() => {
-            const activeIndex = stocks.find(s => s.ticker?.includes("INDEX")) || stocks[0];
-            const h15 = breakout?.high15m ?? 0;
-            const l15 = breakout?.low15m  ?? 0;
-            const use15m = h15 > 0 && l15 > 0 && h15 > l15;
-            const marketRange = use15m
-              ? (h15 - l15)
-              : (activeIndex?.high > 0 && activeIndex?.low > 0 ? (activeIndex.high - activeIndex.low) : 0);
-            const basePrice = use15m
-              ? ((h15 + l15) / 2)
-              : (activeIndex?.open > 0 ? activeIndex.open : activeIndex?.ltp ?? 1);
-            const volPct = basePrice > 0 && marketRange > 0 ? (marketRange / basePrice) * 100 : 0;
-            const [speedLabel, speedColor, barColor, icon] = volPct >= 0.15
-              ? ["FAST / HIGH VOL", "text-rose-400 bg-rose-500/10 border-rose-500/20", "bg-rose-500", "⚡"]
-              : volPct >= 0.08
-              ? ["MODERATE", "text-indigo-400 bg-indigo-500/10 border-indigo-500/20", "bg-indigo-500", "📈"]
-              : ["SLOW", "text-slate-400 bg-slate-500/10 border-slate-500/20", "bg-slate-600", "⏳"];
-
-            const nowIST = new Date(Date.now() + 5.5 * 3_600_000);
-            const h = nowIST.getUTCHours();
-            const m = nowIST.getUTCMinutes();
-            const mFloor = m - (m % 15);
-            const mEnd = mFloor + 15;
-            const hEnd = h + (mEnd >= 60 ? 1 : 0);
-            const timeLabel = `${String(h).padStart(2,'0')}:${String(mFloor).padStart(2,'0')} – ${String(hEnd).padStart(2,'0')}:${String(mEnd % 60).padStart(2,'0')}`;
-
-            return (
-              <div className="flex items-center gap-1.5 ml-auto">
-                {/* DH/DL */}
-                <div className="flex items-center gap-1.5 pr-0.5">
-                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-emerald-950/80 border border-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.25)] text-emerald-400">
-                    <span className="text-[11px] opacity-80 font-sans font-black tracking-wider">DH</span>
-                    <span className="text-[15px] font-black leading-none drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]">{dayHighScore.toFixed(1)}</span>
-                    <span className={`text-[10px] font-bold ${posDelta < 0 ? "text-rose-400" : "text-emerald-400"}`}>
-                      ({posDelta >= 0 ? "+" : ""}{posDelta.toFixed(1)})
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-rose-950/80 border border-rose-500/40 shadow-[0_0_12px_rgba(244,63,94,0.25)] text-rose-400">
-                    <span className="text-[11px] opacity-80 font-sans font-black tracking-wider">DL</span>
-                    <span className="text-[15px] font-black leading-none drop-shadow-[0_0_5px_rgba(251,113,133,0.5)]">{dayLowScore.toFixed(1)}</span>
-                    <span className={`text-[10px] font-bold ${negDelta > 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                      ({negDelta > 0 ? "+" : ""}{negDelta.toFixed(1)})
-                    </span>
-                  </div>
-                </div>
-
-                <div 
-                  className="flex items-center gap-2 px-3 py-1 rounded-xl shadow-lg flex-shrink-0 transition-all duration-500"
-                  style={{
-                    background: "linear-gradient(90deg, rgba(3,46,35,0.4) 0%, rgba(2,31,23,0.6) 100%)",
-                    border: "1px solid rgba(4,120,87,0.3)",
-                    boxShadow: "inset 0 0 20px rgba(16,185,129,0.05)"
-                  }}
-                >
-                  <div className="flex items-center gap-1.5 border-r border-emerald-600/30 pr-2">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-300 drop-shadow-md">
-                      VELOCITY ENGINE
-                    </span>
-                    <div className="text-[10px] font-mono font-bold text-emerald-400 flex items-center gap-1.5 bg-emerald-950/40 px-2 py-0.5 rounded-lg border border-emerald-500/20 shadow-[inset_0_0_8px_rgba(16,185,129,0.1)]">
-                      <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-                      {timeLabel}
-                    </div>
-                  </div>
-                <div className="flex items-center gap-2">
-                  <div className="text-[11px] font-mono font-black text-white bg-black/40 px-2 py-0.5 rounded-lg border border-white/5 shadow-inner">
-                    ₹{marketRange.toFixed(1)}
-                  </div>
-                  <div className="flex items-center gap-1.5 bg-black/40 px-2 py-0.5 rounded-lg border border-white/5 shadow-inner">
-                    <div className="w-12 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full transition-all duration-700 ${barColor}`} style={{ width: `${Math.min(100, (volPct / 0.30) * 100)}%` }} />
-                    </div>
-                    <span className="font-bold text-teal-400 text-[10px] font-mono">{volPct.toFixed(3)}%</span>
-                  </div>
-                  <div>
-                    <span className={`px-2 py-0.5 rounded-lg border text-[9px] font-black uppercase shadow-sm ${speedColor} ${speedLabel.includes("FAST") ? "animate-[pulse_0.7s_ease-in-out_infinite]" : ""}`}>
-                      {icon} {speedLabel}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1 bg-slate-950/60 px-2 py-0.5 rounded-lg border border-slate-800 shadow-inner border-l-2 border-l-sky-500/50">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Tick Pace:</span>
-                    <span className={`text-[10px] font-black ${velocity > 15 ? "text-rose-400" : velocity > 5 ? "text-amber-400" : "text-emerald-400"}`}>
-                      {velocity.toFixed(1)} <span className="text-[8px] opacity-70">pts/s</span>
-                    </span>
-                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${velocity > 15 ? "bg-rose-500/20 text-rose-300 animate-[pulse_0.5s_ease-in-out_infinite] shadow-[0_0_8px_rgba(225,29,72,0.8)]" : velocity > 5 ? "bg-amber-500/20 text-amber-300 animate-[pulse_0.8s_ease-in-out_infinite]" : "bg-emerald-500/20 text-emerald-300"}`}>
-                      {velocity > 15 ? "HIGH VOL" : velocity > 5 ? "FAST" : "SLOW"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              </div>
-            );
-          })()}
-
         </div>
-
       </div>
 
 

@@ -42,6 +42,7 @@ dotenv.config({ path: path.join(process.cwd(), ".env") });
 import { db, initializeSchema }       from "./server/storage/db.js";
 import { marketState }           from "./server/state/marketState.js";
 import { startFyersSocket, stopFyersSocket, resubscribeOptionSymbols } from "./server/services/fyersSocket.js";
+import { startFyersOrderSocket, stopFyersOrderSocket } from "./server/services/fyersOrderSocket.js";
 import { loadAllBackups, startBackupScheduler, takeSnapshot5m, clearBackup, importBackup, importAllBackup, getISTDateStr } from "./server/services/backupScheduler.js";
 import { syncHistoricalBhavcopy, getStockVolumeAverages, seedStocksFromBhavcopy, getStockHistory, downloadAndParseBhavcopy, getRecentSignals } from "./server/services/bhavcopyService.js";
 import { broadcastAll, broadcastStatus }                               from "./server/services/socketBroadcast.js";
@@ -64,10 +65,11 @@ import { initReplaySession, playReplaySession, pauseReplaySession, stepReplaySes
 import { loadStrategies, getStrategies, addStrategy, editStrategy, deleteStrategy } from "./server/services/strategyStore.js";
 import {
   saveSignal, getSignals, updateSignalResult,
-  savePaperTrade, getPaperTrades, closePaperTrade, updatePaperTradeSL, updatePaperTradeNotes, deletePaperTrade,
+  savePaperTrade, getPaperTrades, getPaperTradeById, closePaperTrade, updatePaperTradeSL, updatePaperTradeNotes, deletePaperTrade,
   getLotConfig, getLotSize, updateLotConfig, upsertLotConfigs,
   activatePaperTrade, saveFiiDii, getFiiDiiHistory,
-  getShadowTrades, saveShadowTrade, closeShadowTrade
+  getShadowTrades, saveShadowTrade, closeShadowTrade,
+  saveSwingTrade, getSwingTrades, closeSwingTrade, deleteSwingTrade
 } from "./server/services/tradingEngineDB.js";
 import { runUltraBacktest, geminiOptimizeStrategy, type BacktestRules, type Indicator, type InstrumentType } from "./server/services/ultraBacktestEngine.js";
 import { getQueue, addTask, clearQueue, triggerWorker } from "./server/services/backtestQueueManager.js";
@@ -98,6 +100,17 @@ import { getAutoTradeConfig, saveAutoTradeConfig } from "./server/services/autoT
 import { globalBus } from "./server/services/globalDataBus.js";
 import { csGetTrades, getCsCapital } from "./server/services/continuousScalpEngine.js";
 import { governorService } from "./server/services/governorService.js";
+import {
+  executeFyersOrder,
+  setFyersAutoTradeState, getFyersAutoTradeState, getAllFyersAutoTradeStates,
+  getFyersProfile, getFyersFunds, getFyersPositions, getFyersOrders,
+  getFyersTradebook, getFyersHoldings, logoutFyersUser,
+  cancelFyersOrder, exitAllFyersPositions,
+} from "./server/services/fyersOrderBridge.js";
+import fyersAuthRouter, { handleFyersCallback, exchangeFyersAuthCode } from "./server/routes/fyersAuth.js";
+import { jarvisRouter } from "./server/routes/jarvisRoutes.js";
+import { addApprovalRequest, getAllPendingApprovals, getAllApprovals, approveTradeRequest, rejectTradeRequest, approvalQueueEmitter } from "./server/services/pendingTradeApprovalQueue.js";
+import { getRealTrades, getTodayRealTrades, getTodayRealPnl, getLiveUnrealizedPnl, closeRealTrade } from "./server/services/realTradeStore.js";
 
 // ── AMEX News Intelligence Engine ──────────────────────────────────────────
 import { getNewsForInstrument } from "./server/services/newsEngine.js";
@@ -151,6 +164,7 @@ const io     = new SocketIOServer(server, {
   pingTimeout: 60_000,
   pingInterval: 25_000,
 });
+marketState.io = io;
 const PORT = 3000;
 
 app.use(express.json());
@@ -363,6 +377,12 @@ io.on("connection", (socket) => {
   // Send full current state immediately to new client
   broadcastAll(io);
   socket.emit("smart-orders-update", smartOrderQueueService.getOrders());
+  // Send any pending approval requests to the newly connected client
+  const currentPending = getAllPendingApprovals();
+  if (currentPending.length > 0) {
+    socket.emit("approval-queue-update", currentPending);
+  }
+
 
 
   // Client requests a specific option chain expiry
@@ -416,9 +436,26 @@ function sha256(appId: string, secretKey: string): string {
   return crypto.createHash("sha256").update(`${appId}:${secretKey}`).digest("hex");
 }
 
-// ── API Routes ────────────────────────────────────────────────────────────────
+// ── FYERS OAuth Routes & Auto Interceptor ─────────────────────────────────────
+app.use((req, res, next) => {
+  if ((req.query.auth_code || req.query.code) && (req.path === "/" || req.path === "/callback")) {
+    console.log(`[OAuth Interceptor] Intercepted OAuth code on path: ${req.path}`);
+    return handleFyersCallback(req, res, io);
+  }
+  next();
+});
 
-/** Status ping */
+app.use(fyersAuthRouter);
+app.use((req, res, next) => {
+  (req as any).io = io;
+  next();
+});
+app.use("/api", jarvisRouter);
+
+app.get("/callback", (req, res) => handleFyersCallback(req, res, io));
+app.get("/api/fyers/callback", (req, res) => handleFyersCallback(req, res, io));
+
+/** Status ping & Health Check */
 app.get("/api/status", (_req, res) => {
   res.json({
     status: "online",
@@ -428,6 +465,23 @@ app.get("/api/status", (_req, res) => {
     isSimulating:     marketState.isSimulating,
     lastFyersError:   marketState.lastFyersError,
   });
+});
+app.get("/api/health", (_req, res) => {
+  res.send("AMEX-OS API ONLINE");
+});
+
+/** Per-instrument FYERS AUTO switch state API */
+app.get("/api/fyers/auto-trade-state", (_req, res) => {
+  res.json({ success: true, states: getAllFyersAutoTradeStates() });
+});
+
+app.post("/api/fyers/auto-trade-state", (req, res) => {
+  const { instrument, enabled } = req.body;
+  if (!instrument) return res.status(400).json({ error: "instrument required" });
+  setFyersAutoTradeState(instrument, !!enabled);
+  const updatedStates = getAllFyersAutoTradeStates();
+  io.emit("fyers-auto-trade-state-changed", updatedStates);
+  res.json({ success: true, states: updatedStates });
 });
 
 // ── Governor API Routes ────────────────────────────────────────────────────────
@@ -523,6 +577,7 @@ app.post("/api/fyers/config", async (req, res) => {
     marketState.isSimulating = false;
     console.log("[Config] Token updated — starting server-side Fyers WebSocket...");
     startFyersSocket(access_token, io);
+    startFyersOrderSocket(access_token, marketState.fyersConfig.app_id, io);
     // Also fetch initial option chains with new token (staggered to prevent 429)
     fetchInitialChainsSequentially().catch(console.error);
   }
@@ -557,21 +612,9 @@ app.post("/api/fyers/validate", async (req, res) => {
     return res.status(400).json({ error: "Configure app_id and secret_key first" });
 
   try {
-    const response = await fetch("https://api-t1.fyers.in/api/v3/validate-authcode", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({
-        grant_type: "authorization_code",
-        code:       auth_code,
-        appIdHash:  sha256(app_id, secret_key),
-      }),
-    });
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-
-    const data: any = await response.json();
+    const data: any = await exchangeFyersAuthCode(app_id, secret_key, auth_code);
     if (data.s !== "ok" || !data.access_token)
-      throw new Error(data.message ?? "Token exchange failed");
+      throw new Error(data.message ?? data.errmsg ?? "Token exchange failed");
 
     marketState.fyersConfig.access_token = data.access_token;
     marketState.isSimulating             = false;
@@ -592,6 +635,7 @@ app.post("/api/fyers/validate", async (req, res) => {
 
     console.log("[Auth] Token exchanged — starting Fyers server WebSocket");
     startFyersSocket(data.access_token, io);
+    startFyersOrderSocket(data.access_token, data.app_id || marketState.fyersConfig.app_id, io);
     // Fetch initial option chains sequentially (staggered to prevent 429)
     fetchInitialChainsSequentially().catch(console.error);
 
@@ -1397,6 +1441,272 @@ app.post("/api/te/autotrade/status", (req, res) => {
   }
 });
 
+// ── Shadow-Trade Approval Gate Endpoints ─────────────────────────────────────
+
+/** GET /api/te/pending-trades — List all pending real-trade approval requests */
+app.get("/api/te/pending-trades", (_req, res) => {
+  try {
+    const pending = getAllPendingApprovals();
+    res.json({ success: true, pending });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** GET /api/te/approval-history — List all approvals (PENDING + APPROVED + REJECTED) */
+app.get("/api/te/approval-history", (_req, res) => {
+  try {
+    const all = getAllApprovals();
+    res.json({ success: true, approvals: all });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** POST /api/te/approve-trade/:id — Approve a pending real trade */
+app.post("/api/te/approve-trade/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await approveTradeRequest(id);
+    if (result.success) {
+      // Notify all clients that the queue changed + real trade list updated
+      io.emit("approval-queue-update", getAllPendingApprovals());
+      // Also push updated real trade list so Real Trade tab refreshes
+      io.emit("real-trade-update", {
+        trades: getRealTrades("ALL"),
+        todayPnl: getTodayRealPnl(),
+        livePnl: getLiveUnrealizedPnl(),
+      });
+      io.emit("toast-trigger", { type: "success", title: "✅ Trade Approved & Sent to Fyers", message: result.message });
+    } else {
+      io.emit("toast-trigger", { type: "error", title: "Approval Failed", message: result.message });
+    }
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/** POST /api/te/reject-trade/:id — Reject a pending real trade (paper trade remains) */
+app.post("/api/te/reject-trade/:id", (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = rejectTradeRequest(id);
+    // Notify all clients that the queue changed
+    io.emit("approval-queue-update", getAllPendingApprovals());
+    if (result.success) {
+      io.emit("toast-trigger", { type: "info", title: "❌ Trade Rejected", message: result.message });
+    }
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── Real Trade Endpoints ────────────────────────────────────────────────
+
+/** GET /api/real-trades — List all real trades (separate from paper trades) */
+app.get("/api/real-trades", (req, res) => {
+  try {
+    const status = (req.query.status as any) || "ALL";
+    const trades = getRealTrades(status);
+    const todayPnl = getTodayRealPnl();
+    const livePnl = getLiveUnrealizedPnl();
+    res.json({ success: true, trades, todayPnl, livePnl });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** GET /api/real-trades/today — Today's real trades */
+app.get("/api/real-trades/today", (_req, res) => {
+  try {
+    const trades = getTodayRealTrades();
+    const todayPnl = getTodayRealPnl();
+    const livePnl = getLiveUnrealizedPnl();
+    res.json({ success: true, trades, todayPnl, livePnl });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** POST /api/real-trades/close/:id — Manually close a real trade */
+app.post("/api/real-trades/close/:id", (req, res) => {
+  const { id } = req.params;
+  const { exit_price, reason } = req.body;
+  try {
+    const closed = closeRealTrade(id, parseFloat(exit_price) || 0, reason || "MANUAL");
+    if (!closed) return res.status(404).json({ success: false, message: "Trade not found or already closed" });
+    
+    // Trigger market exit order on Fyers!
+    executeFyersOrder({
+      ...closed,
+      exit_price: parseFloat(exit_price) || 0
+    } as any, "EXIT").catch(err => console.error("[FyersOrderBridge] EXIT Error:", err.message));
+
+    io.emit("real-trade-update", {
+      trades: getRealTrades("ALL"),
+      todayPnl: getTodayRealPnl(),
+      livePnl: getLiveUnrealizedPnl(),
+    });
+    res.json({ success: true, trade: closed });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** POST /api/te/test-scalp — Place a test scalp order for connection verification */
+app.post("/api/te/test-scalp", async (req, res) => {
+  try {
+    const { app_id, access_token } = marketState.fyersConfig;
+    if (!app_id || !access_token) {
+      return res.status(400).json({ success: false, error: "Fyers not authorized. Please authenticate first." });
+    }
+
+    const spot = marketState.niftyOptionChain.spotPrice || 24000;
+    const atmStrike = Math.round(spot / 50) * 50;
+    const strikes = marketState.niftyOptionChain.strikes || [];
+    const strikeData = strikes.find((s: any) => s.strikePrice === atmStrike) || strikes[0];
+    
+    if (!strikeData || !strikeData.ceSymbol) {
+      return res.status(400).json({ success: false, error: "Nifty Option Chain strikes not loaded. Please wait a moment." });
+    }
+
+    const fyersSymbol = strikeData.ceSymbol;
+    
+    // Dynamic import to get Nifty lot size
+    const { getLotSize } = await import("./server/services/tradingEngineDB.js");
+    const lotSize = getLotSize("NIFTY") || 75;
+
+    console.log(`[API] ⚡ Triggering TEST SCALP on ${fyersSymbol} | Qty: ${lotSize} | Price: ₹0.10`);
+
+    const payload = {
+      id: `TEST_${Date.now()}`,
+      instrument: "NIFTY",
+      direction: "BUY_CE",
+      strike: atmStrike,
+      qty: lotSize,
+      entry_price: 0.10,
+      target: 1.00,
+      stop_loss: 0.05,
+      contractSymbol: fyersSymbol,
+      strategyName: "TEST_SCALP",
+      tradeType: "INTRADAY" as const
+    };
+
+    // Execute directly
+    await executeFyersOrder(payload, "ENTRY");
+    res.json({ success: true, message: `Test scalp order dispatched to Fyers for ${fyersSymbol} @ ₹0.10` });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Fyers Account Info Endpoints ────────────────────────────────────────
+
+/** GET /api/fyers/profile — Fyers account profile */
+app.get("/api/fyers/profile", async (_req, res) => {
+  try {
+    const profile = await getFyersProfile();
+    res.json({ success: true, profile });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** GET /api/fyers/funds — Fyers account balance & available margin */
+app.get("/api/fyers/funds", async (_req, res) => {
+  try {
+    const funds = await getFyersFunds();
+    res.json({ success: true, funds });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** GET /api/fyers/positions — Fyers open net positions with overall P&L */
+app.get("/api/fyers/positions", async (_req, res) => {
+  try {
+    const { positions, overall } = await getFyersPositions();
+    res.json({ success: true, positions, overall });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** GET /api/fyers/orders — Fyers today's order book */
+app.get("/api/fyers/orders", async (_req, res) => {
+  try {
+    const orders = await getFyersOrders();
+    res.json({ success: true, orders });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** GET /api/fyers/tradebook — Fyers today's executed trades (tradeBook array) */
+app.get("/api/fyers/tradebook", async (_req, res) => {
+  try {
+    const trades = await getFyersTradebook();
+    // trades is already the tradeBook array from SDK response
+    res.json({ success: true, trades });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** GET /api/fyers/holdings — Fyers long-term holdings with overall summary */
+app.get("/api/fyers/holdings", async (_req, res) => {
+  try {
+    const { holdings, overall } = await getFyersHoldings();
+    res.json({ success: true, holdings, overall });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** DELETE /api/fyers/orders/:id — Cancel a specific Fyers order */
+app.delete("/api/fyers/orders/:id", async (req, res) => {
+  try {
+    const result = await cancelFyersOrder(req.params.id);
+    res.json({ success: true, result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** POST /api/fyers/exit-positions — Exit all open intraday positions */
+app.post("/api/fyers/exit-positions", async (req, res) => {
+  try {
+    const productType = req.body?.productType || "INTRADAY";
+    const result = await exitAllFyersPositions(productType);
+    res.json({ success: true, result });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** POST /api/fyers/logout — Logout Fyers session & clear saved token */
+app.post("/api/fyers/logout", async (_req, res) => {
+  try {
+    const result = await logoutFyersUser();
+    // Clear saved token from marketState & disk
+    marketState.fyersConfig.access_token = "";
+    marketState.fyersAuthorized = false;
+    try {
+      const configFile = path.join(process.cwd(), "fyers_config.json");
+      const existing = JSON.parse(fs.readFileSync(configFile, "utf8"));
+      existing.access_token = "";
+      fs.writeFileSync(configFile, JSON.stringify(existing, null, 2));
+    } catch (_) {}
+    io.emit("fyers-auth-status", { authorized: false });
+    console.log("[Auth] Fyers logout successful");
+    res.json({ success: true, message: result?.message || "Logged out" });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 /** GET /api/te/layer-weights — Current layer weights */
 app.get("/api/te/layer-weights", (_req, res) => {
   try {
@@ -1682,7 +1992,28 @@ app.post("/api/te/paper-trades", (req, res) => {
   if (!trade.id || !trade.instrument || !trade.direction || !trade.strike || !trade.entry_price) {
     return res.status(400).json({ error: "id, instrument, direction, strike, entry_price required" });
   }
+
   savePaperTrade(trade);
+
+  // ── Auto-execute Real Trade if FYERS AUTO is ON ──
+  const inst = (trade.instrument || "").toUpperCase();
+  if (getFyersAutoTradeState(inst)) {
+    executeFyersOrder({
+      id:             trade.id,
+      instrument:     inst,
+      direction:      trade.direction,
+      strike:         Number(trade.strike),
+      qty:            Number(trade.qty) * Number(trade.lot_size || 1),
+      entry_price:    Number(trade.entry_price),
+      target:         Number(trade.target || 0),
+      stop_loss:      Number(trade.stop_loss || 0),
+      contractSymbol: trade.contractSymbol || "",
+      strategyName:   trade.strategyName || "MANUAL",
+      tradeType:      trade.tradeType || "INTRADAY",
+    }, "ENTRY").catch(err => console.error("[API] Real Trade execution error:", err));
+    console.log(`[API] ⚡ Auto-executed real trade for manual paper trade ${trade.id} (${inst})`);
+  }
+
   res.json({ success: true });
 });
 
@@ -1694,6 +2025,24 @@ app.post("/api/te/paper-trades/close", (req, res) => {
   }
   const ok = closePaperTrade(id, Number(exit_price), Number(pnl));
   if (!ok) return res.status(404).json({ error: "Trade not found or already closed" });
+  
+  // Check if there is a linked real trade that is open
+  const linkedReal = getRealTrades("OPEN").find(t => t.paperId === id);
+  if (linkedReal) {
+    console.log(`[API] ⚡ Manually closed paper trade ${id} has linked open real trade ${linkedReal.id}. Triggering Fyers exit...`);
+    closeRealTrade(linkedReal.id, Number(exit_price), "MANUAL");
+    executeFyersOrder({
+      ...linkedReal,
+      exit_price: Number(exit_price)
+    } as any, "EXIT").catch(err => console.error("[FyersOrderBridge] EXIT Error:", err));
+    
+    io.emit("real-trade-update", {
+      trades: getRealTrades("ALL"),
+      todayPnl: getTodayRealPnl(),
+      livePnl: getLiveUnrealizedPnl(),
+    });
+  }
+  
   res.json({ success: true });
 });
 
@@ -2219,6 +2568,63 @@ app.post("/api/position-trades/calc-setup", (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Swing Trade API Endpoints
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** GET /api/swing-trades — Fetch all saved swing trades */
+app.get("/api/swing-trades", (req, res) => {
+  try {
+    const status = req.query.status as string | undefined;
+    const trades = getSwingTrades(status);
+    res.json({ success: true, trades });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** POST /api/swing-trades — Save/insert/update a swing trade position */
+app.post("/api/swing-trades", (req, res) => {
+  try {
+    const trade = req.body;
+    if (!trade.id || !trade.symbol || !trade.direction || !trade.entry_price) {
+      return res.status(400).json({ success: false, error: "Missing required fields: id, symbol, direction, entry_price" });
+    }
+    saveSwingTrade(trade);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** POST /api/swing-trades/:id/close — Close an active swing trade */
+app.post("/api/swing-trades/:id/close", (req, res) => {
+  try {
+    const { id } = req.params;
+    const { exitPrice, status } = req.body;
+    if (!exitPrice || !status) {
+      return res.status(400).json({ success: false, error: "exitPrice and status required" });
+    }
+    const ok = closeSwingTrade(id, Number(exitPrice), status);
+    if (!ok) return res.status(404).json({ success: false, error: "Trade not found or already closed" });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/** DELETE /api/swing-trades/:id — Delete a swing trade position */
+app.delete("/api/swing-trades/:id", (req, res) => {
+  try {
+    const { id } = req.params;
+    const ok = deleteSwingTrade(id);
+    if (!ok) return res.status(404).json({ success: false, error: "Trade not found" });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Layer 13: Swing S&R Level API
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2391,7 +2797,7 @@ async function startServer() {
     console.error("[Boot] Failed to load fyers_config.json:", e.message);
   }
 
-  server.listen(PORT, "0.0.0.0", () => {
+  server.listen(PORT, () => {
     console.log(`\n🚀 CODETRADE Server running → http://localhost:${PORT}`);
     console.log(`   Architecture: Pure Realtime Streaming (Server-side Fyers WebSocket)`);
 
@@ -2403,6 +2809,7 @@ async function startServer() {
       console.log("[Boot] Saved token found — connecting Fyers WebSocket...");
       marketState.isSimulating = false;
       startFyersSocket(marketState.fyersConfig.access_token, io);
+      startFyersOrderSocket(marketState.fyersConfig.access_token, marketState.fyersConfig.app_id, io);
       // Fetch initial option chains sequentially (staggered to prevent 429)
       fetchInitialChainsSequentially().catch(console.error);
     } else {

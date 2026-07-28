@@ -1,5 +1,4 @@
 import React from "react";
-import { TrendingUp, TrendingDown, ShieldAlert, Activity, BarChart2 } from "lucide-react";
 
 interface CallMetricsProps {
   totalCallOI: number;
@@ -20,155 +19,105 @@ export default function CallMetrics({
   callStrength,
   darkMode = false,
 }: CallMetricsProps) {
-  
-  // CALL Pressure Score Color Logic:
-  // - Red if strongly bearish pressure (positive call writing, meaning call writers are aggressive)
-  // - Green if weakening bearish pressure (negative call writing, meaning short covering)
-  const isBearishPressure = callPressure > 0;
-
-  // Call Momentum Color Logic:
-  // - Green if positive (buying support building)
-  // - Red if negative
-  const isPositiveMomentum = callMomentum > 0;
-  const momentumColor = isPositiveMomentum 
-    ? (darkMode ? "text-emerald-400" : "text-emerald-600") 
-    : (darkMode ? "text-rose-400" : "text-rose-600");
-
-  // OI Change Color Logic
-  const oiChgColor = totalCallOIChange >= 0 
-    ? (darkMode ? "text-rose-400" : "text-rose-600") 
-    : (darkMode ? "text-emerald-400" : "text-emerald-600");
+  const isBearish = callPressure > 0;
+  const pressurePct = Math.min(100, Math.max(5, (Math.abs(callPressure) / 500) * 100));
 
   return (
-    <div className={`relative flex flex-col gap-[2px] p-1 pt-1.5 rounded-xl border flex-1 transition-all duration-300 group ${
+    <div className={`relative flex flex-col justify-between h-full p-1.5 px-2 rounded-xl border transition-all duration-300 min-w-0 ${
       darkMode 
-        ? "bg-gradient-to-b from-slate-950/85 via-slate-900/50 to-slate-950/90 border-slate-800/80 text-white shadow-[0_4px_24px_rgba(0,0,0,0.5)] hover:border-slate-700/50" 
-        : "bg-gradient-to-b from-slate-50/95 via-slate-100/90 to-slate-200/95 border-slate-200 text-slate-900 shadow-[0_4px_24px_rgba(0,0,0,0.06)] hover:border-slate-350"
+        ? "bg-slate-950/90 border-emerald-500/30 text-white shadow-[0_2px_12px_rgba(16,185,129,0.06)] hover:border-emerald-500/50" 
+        : "bg-emerald-50/40 border-emerald-200 text-slate-900 shadow-sm"
     }`}>
-      {/* Premium Red Top Accent Bar */}
-      <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-red-600/80 via-rose-500/90 to-red-500/70 rounded-t-xl shadow-[0_1px_8px_rgba(239,68,68,0.4)]" />
+      {/* Top Accent Neon Line */}
+      <div className="absolute top-0 left-0 right-0 h-[2.5px] bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400 rounded-t-xl shadow-[0_0_10px_rgba(16,185,129,0.8)]" />
 
-      {/* Section Header */}
-      <div className={`flex items-center justify-between pb-0.5 relative z-10 ${
-        darkMode ? "border-slate-800/80" : "border-slate-200"
-      }`}>
-        <span className="text-[10px] font-black text-rose-500 tracking-widest uppercase flex items-center gap-1 animate-pulse-slow">
-          <ShieldAlert size={12} className="text-rose-500" />
-          CALL METRICS (CE)
-        </span>
+      {/* Header Strip */}
+      <div className="flex items-center justify-between min-w-0 pb-1 border-b border-emerald-500/25">
+        <div className="flex items-center gap-1.5 truncate">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0 shadow-[0_0_8px_rgba(16,185,129,0.9)]" />
+          <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 truncate">
+            CALL METRICS (CE)
+          </span>
+        </div>
         <div className="flex items-center gap-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-ping" />
-          <span className={`text-[9px] font-mono font-bold uppercase tracking-widest border px-1.5 py-0.2 rounded ${
-            darkMode ? "bg-slate-900 border-slate-800/80 text-slate-400" : "bg-white border-slate-200 text-slate-600"
+          <span className="text-[7.5px] font-bold px-1.5 py-0.2 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 uppercase">BUYER FLOW</span>
+          <span className={`text-[7.5px] font-mono font-black uppercase px-1.5 py-0.2 rounded border truncate ${
+            isBearish
+              ? "text-rose-300 bg-rose-950/70 border-rose-700/50 shadow-[0_0_8px_rgba(244,63,94,0.3)]"
+              : "text-emerald-300 bg-emerald-950/70 border-emerald-700/50 shadow-[0_0_8px_rgba(16,185,129,0.3)]"
           }`}>
-            CE DATA
+            {isBearish ? "BEAR DOM" : "SHORT COV"}
           </span>
         </div>
       </div>
 
-      {/* Grid of Main Metrics */}
-      <div className="grid grid-cols-2 gap-[1px] relative z-10">
-        {/* Total CALL Open Interest */}
-        <div className={`p-1 rounded-lg border transition-all duration-300 flex flex-col justify-between ${
-          darkMode 
-            ? "bg-slate-950/65 border-slate-900/90 hover:border-slate-800 shadow-[inset_0_1.5px_4px_rgba(0,0,0,0.6)]" 
-            : "bg-white/80 border-slate-200 hover:border-slate-350 shadow-[inset_0_1px_2px_rgba(0,0,0,0.03)]"
+      {/* Row 1: Total OI & OI Change & Pressure Score */}
+      <div className="grid grid-cols-2 gap-1.5 my-1">
+        {/* Total Call OI & Big OI Change */}
+        <div className={`p-1.5 rounded-lg border flex items-center justify-between min-w-0 ${
+          darkMode ? "bg-slate-900/70 border-slate-800/90 shadow-inner" : "bg-white border-emerald-100"
         }`}>
-          <span className="text-[8.5px] font-black text-slate-500 uppercase tracking-wide block">Total OI</span>
-          <span className="font-mono mt-0.5 block text-amber-500 dark:text-yellow-400 drop-shadow-[0_0_3px_rgba(234,179,8,0.2)]">
-            <span className="text-[9.5px] font-black mr-0.5 opacity-75">OI</span>
-            <span className="text-[13px] md:text-[14px] font-black">+{totalCallOI.toFixed(2)}L</span>
-          </span>
+          <div className="flex flex-col min-w-0">
+            <span className="text-[7px] font-black text-slate-400 uppercase tracking-tight">TOTAL CE OI</span>
+            <span className="font-mono text-[14px] font-black text-emerald-400 truncate leading-tight drop-shadow-[0_0_8px_rgba(52,211,153,0.4)]">
+              +{totalCallOI.toFixed(2)}L
+            </span>
+          </div>
+
+          {/* SECOND DATA: OI CHG */}
+          <div className="flex flex-col items-end min-w-0">
+            <span className="text-[7px] font-black text-slate-400 uppercase tracking-tight">OI CHG</span>
+            <span className={`font-mono text-[11.5px] font-black leading-tight ${
+              totalCallOIChange >= 0 ? "text-emerald-400 drop-shadow-[0_0_6px_rgba(16,185,129,0.4)]" : "text-rose-400 drop-shadow-[0_0_6px_rgba(244,63,94,0.4)]"
+            }`}>
+              {totalCallOIChange >= 0 ? "+" : ""}{totalCallOIChange.toFixed(2)}L {totalCallOIChange >= 0 ? "▲" : "▼"}
+            </span>
+          </div>
         </div>
 
-        {/* Total CALL OI Change */}
-        <div className={`p-1 rounded-lg border transition-all duration-300 flex flex-col justify-between ${
-          darkMode 
-            ? "bg-slate-950/65 border-slate-900/90 hover:border-slate-800 shadow-[inset_0_1.5px_4px_rgba(0,0,0,0.6)]" 
-            : "bg-white/80 border-slate-200 hover:border-slate-350 shadow-[inset_0_1px_2px_rgba(0,0,0,0.03)]"
+        {/* Call Pressure Score */}
+        <div className={`p-1.5 rounded-lg border flex flex-col justify-center min-w-0 ${
+          isBearish
+            ? darkMode ? "bg-gradient-to-r from-rose-950/40 to-slate-900/80 border-rose-800/50 text-rose-300 shadow-[0_0_10px_rgba(244,63,94,0.15)]" : "bg-rose-50 border-rose-200"
+            : darkMode ? "bg-gradient-to-r from-emerald-950/40 to-slate-900/80 border-emerald-800/50 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.15)]" : "bg-emerald-50 border-emerald-200"
         }`}>
-          <span className="text-[8.5px] font-black text-slate-500 uppercase tracking-wide block">OI Change</span>
-          <div className="flex items-baseline justify-between w-full mt-0.5">
-            <span className="text-[13px] md:text-[14px] font-black font-mono text-amber-500 dark:text-yellow-400 drop-shadow-[0_0_3px_rgba(234,179,8,0.2)]">
-              {totalCallOIChange.toFixed(3)}L
+          <div className="flex items-center justify-between text-[7px] font-black uppercase">
+            <span className="text-slate-400">PRESSURE SCORE</span>
+            <span className={`text-[6.5px] font-mono font-bold ${isBearish ? "text-rose-400" : "text-emerald-400"}`}>
+              {isBearish ? "CALL SHORT" : "CALL BUYING"}
             </span>
-            <span className={`text-[8.5px] font-bold px-1 py-0.2 rounded scale-90 ${
-              totalCallOIChange >= 0 ? "text-rose-500 bg-rose-500/10" : "text-emerald-500 bg-emerald-500/10"
-            }`}>
-              {totalCallOIChange >= 0 ? "▲" : "▼"}
+          </div>
+          <div className="flex items-baseline justify-end min-w-0 my-0.5">
+            <span className={`font-mono text-[15px] font-black leading-tight text-right ${isBearish ? "text-rose-400 drop-shadow-[0_0_10px_rgba(244,63,94,0.5)]" : "text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.5)]"}`}>
+              {callPressure > 0 ? "+" : ""}{callPressure.toFixed(2)}
             </span>
+          </div>
+          <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden border border-slate-800/60 p-[0.5px]">
+            <div className={`h-full rounded-full transition-all duration-500 ${isBearish ? "bg-gradient-to-r from-rose-500 to-red-400 shadow-[0_0_6px_rgba(244,63,94,0.8)]" : "bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_6px_rgba(16,185,129,0.8)]"}`} style={{ width: `${pressurePct}%` }} />
           </div>
         </div>
       </div>
 
-      {/* CALL Pressure Score (Institutional Block Indicator) */}
-      <div className={`p-1 rounded-lg border transition-all duration-300 flex flex-col relative z-10 border-l-[3px] ${
-        isBearishPressure 
-          ? darkMode
-            ? "bg-gradient-to-r from-red-950/20 via-red-900/10 to-transparent border-red-500/25 border-l-red-500 text-red-400 shadow-[0_2px_10px_rgba(239,68,68,0.06)]"
-            : "bg-gradient-to-r from-red-50/70 via-red-100/30 to-transparent border-red-200 border-l-red-500 text-red-700 shadow-[0_2px_8px_rgba(239,68,68,0.04)]"
-          : darkMode
-            ? "bg-gradient-to-r from-emerald-950/20 via-emerald-900/10 to-transparent border-emerald-500/25 border-l-emerald-500 text-emerald-400 shadow-[0_2px_10px_rgba(16,185,129,0.06)]"
-            : "bg-gradient-to-r from-emerald-50/70 via-emerald-100/30 to-transparent border-emerald-200 border-l-emerald-500 text-emerald-700 shadow-[0_2px_8px_rgba(16,185,129,0.04)]"
+      {/* Row 2: MOM, AVG PREM, STRENGTH */}
+      <div className={`grid grid-cols-3 gap-1.5 p-1.5 rounded-lg border text-center ${
+        darkMode ? "bg-slate-900/60 border-slate-800/80 shadow-sm" : "bg-white border-emerald-100"
       }`}>
-        <div className="flex justify-between items-center">
-          <span className={`text-[8.5px] font-black uppercase tracking-wide ${darkMode ? "text-slate-400" : "text-slate-500"}`}>CALL Pressure Score</span>
-          <span className={`text-[8px] font-mono px-1 py-0.2 rounded font-black border uppercase tracking-wider scale-90 origin-right ${
-            isBearishPressure
-              ? darkMode
-                ? "bg-red-950/80 border-red-800/60 text-red-300"
-                : "bg-red-50 border-red-200 text-red-700"
-              : darkMode
-                ? "bg-emerald-950/80 border-emerald-800/60 text-emerald-300"
-                : "bg-emerald-50 border-emerald-200 text-emerald-700"
-          }`}>
-            {isBearishPressure ? "BEAR DOMINATION" : "SHORT COVERING"}
+        <div className="flex flex-col">
+          <span className="text-[7px] font-black text-slate-400 uppercase tracking-tight">MOM</span>
+          <span className="font-mono text-[11.5px] font-black text-amber-400 leading-tight drop-shadow-[0_0_6px_rgba(245,158,11,0.3)]">
+            {callMomentum >= 0 ? "+" : ""}{callMomentum.toFixed(1)}
           </span>
         </div>
-        <span className={`text-[17px] font-black font-mono tracking-tight mt-0.5 ${
-          isBearishPressure 
-            ? (darkMode ? "text-red-400" : "text-red-600") 
-            : (darkMode ? "text-emerald-400" : "text-emerald-600")
-        }`}>
-          {callPressure > 0 ? "+" : ""}{callPressure.toFixed(2)}
-        </span>
-      </div>
-
-      {/* Grid of Secondary Metrics */}
-      <div className="grid grid-cols-3 gap-[1px] relative z-10">
-        {/* CALL Momentum */}
-        <div className={`p-1 rounded-lg border flex flex-col justify-between h-[42px] transition-colors shadow-sm ${
-          darkMode 
-            ? "bg-slate-950/35 border-slate-900 hover:border-slate-800 shadow-[inset_0_1px_3px_rgba(0,0,0,0.5)]" 
-            : "bg-white/80 border-slate-200 hover:border-slate-350 shadow-[inset_0_1px_2px_rgba(0,0,0,0.03)]"
-        }`}>
-          <span className={`text-[8.5px] font-black uppercase tracking-wide ${darkMode ? "text-slate-400" : "text-slate-500"}`}>Momentum</span>
-          <span className="text-[12px] md:text-[13px] font-black font-mono truncate text-amber-500 dark:text-yellow-400 drop-shadow-[0_0_3px_rgba(234,179,8,0.2)]">
-            {callMomentum >= 0 ? "+" : ""}{callMomentum.toFixed(2)}
+        <div className="flex flex-col">
+          <span className="text-[7px] font-black text-slate-400 uppercase tracking-tight">AVG PREM</span>
+          <span className={`font-mono text-[11.5px] font-black leading-tight ${callAvgPremiumChange >= 0 ? "text-emerald-400 drop-shadow-[0_0_6px_rgba(16,185,129,0.3)]" : "text-rose-400 drop-shadow-[0_0_6px_rgba(244,63,94,0.3)]"}`}>
+            {callAvgPremiumChange >= 0 ? "+" : ""}{callAvgPremiumChange.toFixed(1)}%
           </span>
         </div>
-
-        {/* CALL Avg Premium Change */}
-        <div className={`p-1 rounded-lg border flex flex-col justify-between h-[42px] transition-colors shadow-sm ${
-          darkMode 
-            ? "bg-slate-950/35 border-slate-900 hover:border-slate-800 shadow-[inset_0_1px_3px_rgba(0,0,0,0.5)]" 
-            : "bg-white/80 border-slate-200 hover:border-slate-350 shadow-[inset_0_1px_2px_rgba(0,0,0,0.03)]"
-        }`}>
-          <span className={`text-[8.5px] font-black uppercase tracking-wide ${darkMode ? "text-slate-400" : "text-slate-500"}`}>Avg Prem</span>
-          <span className="text-[12px] md:text-[13px] font-black font-mono truncate text-amber-500 dark:text-yellow-400 drop-shadow-[0_0_3px_rgba(234,179,8,0.2)]">
-            {callAvgPremiumChange >= 0 ? "+" : ""}{callAvgPremiumChange.toFixed(2)}%
-          </span>
-        </div>
-
-        {/* CALL Strength Score */}
-        <div className={`p-1 rounded-lg border flex flex-col justify-between h-[42px] transition-colors shadow-sm ${
-          darkMode 
-            ? "bg-slate-950/35 border-slate-900 hover:border-slate-800 shadow-[inset_0_1px_3px_rgba(0,0,0,0.5)]" 
-            : "bg-white/80 border-slate-200 hover:border-slate-350 shadow-[inset_0_1px_2px_rgba(0,0,0,0.03)]"
-        }`}>
-          <span className={`text-[8.5px] font-black uppercase tracking-wide ${darkMode ? "text-slate-400" : "text-slate-500"}`}>Strength</span>
-          <span className="text-[12px] md:text-[13px] font-black font-mono truncate text-amber-500 dark:text-yellow-400 drop-shadow-[0_0_3px_rgba(234,179,8,0.2)]">
-            {callStrength.toFixed(1)}
+        <div className="flex flex-col">
+          <span className="text-[7px] font-black text-slate-400 uppercase tracking-tight">STRENGTH</span>
+          <span className="font-mono text-[11.5px] font-black text-cyan-400 leading-tight drop-shadow-[0_0_6px_rgba(34,211,238,0.3)]">
+            {callStrength.toFixed(0)}
           </span>
         </div>
       </div>

@@ -335,6 +335,10 @@ const PaperTradingCard: React.FC<PaperTradingCardProps> = (props) => {
         reason: result.autoTradeSuggestion.notes
       });
 
+      // Determine if Fyers Auto Trade is enabled for this specific instrument
+      const instrument = result.autoTradeSuggestion.instrument || activePage;
+      const fyersAutoTradeEnabled = localStorage.getItem(`fyers_auto_trade_${instrument}`) === "true";
+
       const res = await fetch(getApiUrl("/api/te/paper-trades"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -344,6 +348,7 @@ const PaperTradingCard: React.FC<PaperTradingCardProps> = (props) => {
           notes: notesJson,
           pnl: 0,
           created_at: Date.now(),
+          execute_fyers: fyersAutoTradeEnabled,
         }),
       });
 
@@ -447,16 +452,29 @@ const PaperTradingCard: React.FC<PaperTradingCardProps> = (props) => {
       if (openPositionsWithLtp.length > 0) {
         const nowMs = Date.now();
         const istOffset = 5.5 * 60 * 60 * 1000;
-        const istDate = new Date(nowMs + istOffset);
-        const hours = istDate.getUTCHours();
-        const minutes = istDate.getUTCMinutes();
-        const totalMinutes = hours * 60 + minutes;
-        const isTimeExit = tradingMode === "INTRADAY" && totalMinutes >= (15 * 60 + 25);
+        const currentIstDate = new Date(nowMs + istOffset);
+        const currentTotalMinutes = currentIstDate.getUTCHours() * 60 + currentIstDate.getUTCMinutes();
 
         for (const pos of openPositionsWithLtp) {
           const currentPremium = pos.currentPremium;
           let exitReason = "";
           let shouldExit = false;
+
+          // Determine if it was placed before 3 PM or after
+          const posIstDate = new Date(pos.timestamp + istOffset);
+          const posTotalMinutes = posIstDate.getUTCHours() * 60 + posIstDate.getUTCMinutes();
+          const isMarginTrade = posTotalMinutes >= (15 * 60);
+
+          let isTimeExit = false;
+          if (tradingMode === "INTRADAY") {
+            if (isMarginTrade) {
+              // Margin trades close at 15:28
+              isTimeExit = currentTotalMinutes >= (15 * 60 + 28);
+            } else {
+              // Intraday trades close at 15:25
+              isTimeExit = currentTotalMinutes >= (15 * 60 + 25);
+            }
+          }
 
           const isReverseDecision = (pos.direction === "BUY_CE" && aiDecisionResult.finalDecision === "BUY_PE") ||
                                     (pos.direction === "BUY_PE" && aiDecisionResult.finalDecision === "BUY_CE");
@@ -475,7 +493,7 @@ const PaperTradingCard: React.FC<PaperTradingCardProps> = (props) => {
 
           if (isTimeExit) {
             shouldExit = true;
-            exitReason = "FORCE TIME EXIT (15:25 IST)";
+            exitReason = isMarginTrade ? "FORCE TIME EXIT (15:28 IST)" : "FORCE TIME EXIT (15:25 IST)";
           } else if (isSwingTimeDecayExit) {
             shouldExit = true;
             exitReason = "SWING TIME DECAY EXIT (4 Days Hold Limit)";

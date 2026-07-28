@@ -26,6 +26,9 @@ import { globalBus } from "./globalDataBus.js";
 import { getVWAP } from "./candleAggregator.js";
 import { getPositionTrades, openPositionTrade, updatePositionPrices, type PositionTradeSetup } from "./positionTradeEngine.js";
 import { governorService } from "./governorService.js";
+import { executeFyersOrder, getFyersAutoTradeState } from "./fyersOrderBridge.js";
+import { addApprovalRequest } from "./pendingTradeApprovalQueue.js";
+import { evaluateAIBrain } from "./aiBrainEngine.js";
 
 function estimateATR(page: string, spotPrice: number): number {
   const vix = marketState.niftyOptionChain.indiaVix || 15;
@@ -77,6 +80,11 @@ const MOMENTUM_TIERS = {
 export const scoreDayHighs: Record<string, number> = { NIFTY: -999, BANKNIFTY: -999, SENSEX: -999 };
 export const scoreDayLows: Record<string, number> = { NIFTY: 999, BANKNIFTY: 999, SENSEX: 999 };
 let lastResetDate = "";
+
+// ── Zero LTP Stale Tracker ─────────────────────────────────────────────────────
+// Tracks when a trade's LTP first went to zero. If > 3 minutes, force-exit to
+// prevent total premium wipeout from feed disconnection / illiquid options.
+const _staleZeroLTPTracker: Map<string, number> = new Map();
 
 smartOrderQueueService.onExecuteOrder(async (order, params) => {
   if (params) {
@@ -620,7 +628,7 @@ async function triggerAutoTrade(
   }
 
   // Dynamic Lot Size Calculation based on Segmented Capital
-  const baseCapital = tradeType === "POSITIONAL" ? 50000 : 30000;
+  const baseCapital = tradeType === "POSITIONAL" ? 60000 : 30000; // SWING FUND: ₹60,000 dedicated capital for positional trades
   
   const closedTrades = getPaperTrades("CLOSED").filter(t => {
     try {
@@ -774,15 +782,15 @@ async function triggerAutoTrade(
   // Clamping limits based on page index & trade type
   let minSL = 10, maxSL = 25;
   if (tradeType === "POSITIONAL") {
-    // Expand SL and Target for positional trades
-    premiumSL = premiumSL * 1.5;
-    targetPoints = targetPoints * 1.5;
+    // SWING HOLD MODE: Wider SL = trade holds through noise, Bigger target = swing profit
+    premiumSL = premiumSL * 2.0;       // 2x SL — trade hold karega, premature exit nahi
+    targetPoints = targetPoints * 2.5;  // 2.5x Target — swing profit maximize
     if (page === "SENSEX") {
-      minSL = 25; maxSL = 65;
+      minSL = 30; maxSL = 80;
     } else if (page === "BANKNIFTY") {
-      minSL = 20; maxSL = 45;
+      minSL = 25; maxSL = 60;
     } else {
-      minSL = 10; maxSL = 30;
+      minSL = 15; maxSL = 40;
     }
   } else {
     // Intraday clamping limits
@@ -802,40 +810,65 @@ async function triggerAutoTrade(
     }
   }
 
-  const dynamicSLPoints = Math.max(minSL, Math.min(maxSL, premiumSL));
+  let finalDynamicSL: number;
+  let finalTarget: number;
+  let targetReason: string;
+
+  if (tradeType === "POSITIONAL") {
+    // Dynamic positional SL & Target based on percentage of entry premium and VIX
+    let slPercent = 0.45; // Default 45% SL
+    let targetPercent = 2.0; // Default +200% target points (3.0x premium)
+    
+    if (vix > 18) {
+      slPercent = 0.50;
+      targetPercent = 2.5;
+    } else if (vix < 12) {
+      slPercent = 0.40;
+      targetPercent = 1.5;
+    }
+    
+    finalDynamicSL = parseFloat((entryPrice * slPercent).toFixed(1));
+    const targetDelta = parseFloat((entryPrice * targetPercent).toFixed(1));
+    finalTarget = parseFloat((entryPrice + targetDelta).toFixed(1));
+    targetReason = `Positional Swing Target: Entry ₹${entryPrice.toFixed(1)} | Target +${(targetPercent*100).toFixed(0)}% (₹${finalTarget.toFixed(1)}) | SL -${(slPercent*100).toFixed(0)}% (₹${(entryPrice - finalDynamicSL).toFixed(1)}) [VIX Adaptive]`;
+  } else {
+    const dynamicSLPoints = Math.max(minSL, Math.min(maxSL, premiumSL));
+    
+    // AI Self Mind: Enforce Minimum 1:1.5 Risk-Reward Ratio
+    if (targetPoints < dynamicSLPoints * 1.5) {
+      targetPoints = parseFloat((dynamicSLPoints * 1.5).toFixed(1));
+    }
+    
+    const stopLoss = entryPrice - dynamicSLPoints;
+    const target = entryPrice + targetPoints;
   
-  // AI Self Mind: Enforce Minimum 1:1.5 Risk-Reward Ratio
-  if (targetPoints < dynamicSLPoints * 1.5) {
-    targetPoints = parseFloat((dynamicSLPoints * 1.5).toFixed(1));
-  }
+    // ── Expiry Day: tighter SL + smaller target ──────────────────────────────
+    finalDynamicSL = expiryDayForTrade
+      ? Math.max(minSL * 0.5, dynamicSLPoints * EXPIRY_CONFIG.slMultiplier)
+      : dynamicSLPoints;
+    finalTarget = expiryDayForTrade
+      ? entryPrice + targetPoints * EXPIRY_CONFIG.targetMultiplier
+      : target;
   
-  const stopLoss = entryPrice - dynamicSLPoints;
-  const target = entryPrice + targetPoints;
-
-  // ── Expiry Day: tighter SL + smaller target ──────────────────────────────
-  let finalDynamicSL = expiryDayForTrade
-    ? Math.max(minSL * 0.5, dynamicSLPoints * EXPIRY_CONFIG.slMultiplier)
-    : dynamicSLPoints;
-  let finalTarget = expiryDayForTrade
-    ? entryPrice + targetPoints * EXPIRY_CONFIG.targetMultiplier
-    : target;
-
-  // ATR & VIX Adaptive Target/SL Scaling (10x Phase 2)
-  let adaptiveVixScaler = 1.0;
-  if (vix > 18) {
-    adaptiveVixScaler = 1.3;
-  } else if (vix < 12) {
-    adaptiveVixScaler = 0.8;
+    // ATR & VIX Adaptive Target/SL Scaling (10x Phase 2)
+    let adaptiveVixScaler = 1.0;
+    if (vix > 18) {
+      adaptiveVixScaler = 1.3;
+    } else if (vix < 12) {
+      adaptiveVixScaler = 0.8;
+    }
+  
+    finalDynamicSL *= adaptiveVixScaler;
+    let targetDelta = finalTarget - entryPrice;
+    targetDelta *= adaptiveVixScaler;
+    finalTarget = entryPrice + targetDelta;
+    
+    targetReason = `${expiryDayForTrade ? "⚡EXPIRY " : ""}S/R Target: Spot ${spotPrice.toFixed(0)} → ${isCEVal ? "Res" : "Sup"} ${isCEVal ? callWall : putWall} (${spotDistanceToSR.toFixed(0)} pts) × Δ${parsedDelta.toFixed(2)} = ${deltaScaledTarget.toFixed(1)} → clamped ${targetPoints.toFixed(1)} pts${expiryDayForTrade ? ` × ${EXPIRY_CONFIG.targetMultiplier} (EXPIRY)` : ""} (VIX x${vixMultiplier.toFixed(1)}, Type: ${tradeType}, VIX-Scaler x${adaptiveVixScaler})${aiTuningNote}`;
   }
 
-  finalDynamicSL *= adaptiveVixScaler;
-  let targetDelta = finalTarget - entryPrice;
-  targetDelta *= adaptiveVixScaler;
-  finalTarget = entryPrice + targetDelta;
-
-  let finalStopLoss = entryPrice - finalDynamicSL;
-
-  let targetReason = `${expiryDayForTrade ? "⚡EXPIRY " : ""}S/R Target: Spot ${spotPrice.toFixed(0)} → ${isCEVal ? "Res" : "Sup"} ${isCEVal ? callWall : putWall} (${spotDistanceToSR.toFixed(0)} pts) × Δ${parsedDelta.toFixed(2)} = ${deltaScaledTarget.toFixed(1)} → clamped ${targetPoints.toFixed(1)} pts${expiryDayForTrade ? ` × ${EXPIRY_CONFIG.targetMultiplier} (EXPIRY)` : ""} (VIX x${vixMultiplier.toFixed(1)}, Type: ${tradeType}, VIX-Scaler x${adaptiveVixScaler})${aiTuningNote}`;
+  let finalStopLoss = parseFloat((entryPrice - finalDynamicSL).toFixed(1));
+  finalTarget = parseFloat(finalTarget.toFixed(1));
+  finalDynamicSL = parseFloat(finalDynamicSL.toFixed(1));
 
   if (forcedStrategy) {
     signalCategory = forcedStrategy.strategyName;
@@ -1032,7 +1065,7 @@ async function triggerAutoTrade(
         reasoning:    targetReason,
         riskReward:   2.0,
       };
-      openPositionTrade(setup);
+      const posTrade = openPositionTrade(setup);
       
       const logMsg = `Placed REAL ${tradeType} auto-trade on ${page}: ${trade.direction} at premium ${trade.entry_price} (Symbol: ${contractSymbol}) | Target: ${trade.target}`;
       console.log(`[AutoTrader-Srv] ${logMsg}`);
@@ -1040,8 +1073,13 @@ async function triggerAutoTrade(
       
       // Emit entry alarm & Toast
       try {
+        let whyTakenDetails: any = {};
+        try {
+          whyTakenDetails = JSON.parse(trade.notes || "{}").whyTaken || {};
+        } catch (_) {}
+
         const entryAlarm = buildEntryAlarm({
-          tradeId:      `PT_${Date.now()}`,
+          tradeId:      posTrade.id,
           instrument:   page,
           direction:    trade.direction as "BUY_CE" | "BUY_PE",
           strike:       trade.strike,
@@ -1053,29 +1091,9 @@ async function triggerAutoTrade(
           lotSize:      lot_size,
           confidence:   antigravity.confidence || 75,
           grade:        antigravity.confidence >= 80 ? "A" : "B",
-          strategyName: tradeType === "POSITIONAL" ? `${targetReason}_SWING` : targetReason,
-          whyTaken:     {
-            weightedStockScore: 0,
-            weightedDirection: "",
-            keyStockMovers: "",
-            specialTrioStatus: "",
-            bankingSectorScore: 0,
-            regimeLabel: "",
-            breadthScore: 0,
-            pcr: 0,
-            momentumScore: 0,
-            smartMoneyBias: "",
-            gatesPassed: 0,
-            totalGates: 9,
-            layerConsensus: "",
-            orbStatus: "",
-            signalGrade: "",
-            antigravityScore: 0,
-            vix: vix,
-            vixCategory: "",
-            strategyReason: targetReason,
-          },
-          tradesToday:  0, // Handled automatically by client updates
+          strategyName: `${signalCategory} (Positional)`,
+          whyTaken:     whyTakenDetails,
+          tradesToday:  0,
           dailyPnl:     0,
           dailyTarget:  3000,
         });
@@ -1089,6 +1107,24 @@ async function triggerAutoTrade(
         title: "Promoted Swing Trade Triggered",
         message: `${page} ${trade.direction} swing position opened at ₹${entryPrice}`
       });
+
+      // ── Fyers Auto Trading Order Execution Support for Positional Trades ──
+      if (getFyersAutoTradeState(page)) {
+        executeFyersOrder({
+          id: posTrade.id,
+          instrument: page,
+          direction: trade.direction,
+          strike: trade.strike,
+          qty: qty * lot_size,
+          entry_price: trade.entry_price,
+          target: finalTarget,
+          stop_loss: finalStopLoss,
+          contractSymbol,
+          strategyName: `${signalCategory} (Positional)`,
+          tradeType: "POSITIONAL",
+        }, "ENTRY").catch(err => console.error("[AutoTrader-Srv] Real Swing trade execution error:", err));
+        console.log(`[AutoTrader-Srv] ⚡ REAL SWING TRADE auto-executed | ${page}`);
+      }
       
       resubscribeOptionSymbols();
       return;
@@ -1098,6 +1134,27 @@ async function triggerAutoTrade(
     const logMsg = `Placed ${tradeType} auto-trade on ${page}: ${trade.direction} at premium ${trade.entry_price} (Symbol: ${contractSymbol}) | Target: ${trade.target}`;
     console.log(`[AutoTrader-Srv] ${logMsg}`);
     globalBus.addLog(logMsg, "info");
+
+    // ── Shadow-Trade Approval Gate ────────────────────────────────────────────
+    // Paper trade is saved immediately above.
+    // If FYERS AUTO is ON, instead of executing instantly, we push to the
+    // PendingApprovalQueue and notify the user to approve/reject within 5 min.
+    if (getFyersAutoTradeState(page)) {
+      executeFyersOrder({
+        id: trade.id,
+        instrument: page,
+        direction: trade.direction,
+        strike: trade.strike,
+        qty: trade.qty * trade.lot_size,
+        entry_price: trade.entry_price,
+        target: trade.target,
+        stop_loss: trade.stop_loss,
+        contractSymbol,
+        strategyName: trade.strategyName || signalCategory,
+        tradeType: "INTRADAY",
+      }, "ENTRY").catch(err => console.error("[AutoTrader-Srv] Real Intraday trade execution error:", err));
+      console.log(`[AutoTrader-Srv] ⚡ REAL TRADE auto-executed | ${page} ${trade.direction}`);
+    }
     
     // Dynamic re-subscription to socket for this trade contract symbol
     resubscribeOptionSymbols();
@@ -1175,6 +1232,42 @@ async function triggerAutoTrade(
   } catch (dbErr: any) {
     console.error("[AutoTrader-Srv] Failed to insert paper trade:", dbErr.message);
   }
+}
+
+async function closePaperAndLinkedRealTrade(
+  pos: any,
+  exitPrice: number,
+  exitPnl: number,
+  exitReason: string,
+  io: any
+): Promise<boolean> {
+  const success = closePaperTrade(pos.id, parseFloat(exitPrice.toFixed(1)), parseFloat(exitPnl.toFixed(1)));
+  if (success) {
+    try {
+      const { getRealTrades, closeRealTrade, getTodayRealPnl, getLiveUnrealizedPnl } = await import("./realTradeStore.js");
+      const { executeFyersOrder } = await import("./fyersOrderBridge.js");
+      
+      const linkedReal = getRealTrades("OPEN").find(t => t.paperId === pos.id);
+      if (linkedReal) {
+        console.log(`[AutoTrader-Srv] ⚡ Auto-closed paper trade ${pos.id} has linked open real trade ${linkedReal.id}. Triggering Fyers exit...`);
+        closeRealTrade(linkedReal.id, parseFloat(exitPrice.toFixed(1)), exitReason);
+        
+        executeFyersOrder({
+          ...linkedReal,
+          exit_price: exitPrice
+        } as any, "EXIT").catch(err => console.error("[AutoTrader-Srv] Real trade exit error:", err.message));
+        
+        io.emit("real-trade-update", {
+          trades: getRealTrades("ALL"),
+          todayPnl: getTodayRealPnl(),
+          livePnl: getLiveUnrealizedPnl(),
+        });
+      }
+    } catch (err: any) {
+      console.error("[AutoTrader-Srv] Failed to handle linked real trade closure:", err.message);
+    }
+  }
+  return success;
 }
 
 export async function runServerSideAutoTrading(
@@ -1296,10 +1389,36 @@ export async function runServerSideAutoTrading(
       }
 
       // ── Zero LTP Protection (Fyers Feed Disconnection) ──
+      // If LTP is 0 or NaN, do NOT just skip — track how long and force-exit if > 3 mins
       if (currentPremium <= 0 || isNaN(currentPremium)) {
-        console.warn(`[AutoTrader-Srv] ⚠ Skipping exit check for trade ${pos.id} on ${page} because LTP is 0 (Feed Disconnection or Illiquid).`);
+        // Use a per-trade stale counter stored in a module-level map
+        const nowMs = Date.now();
+        const staleKey = pos.id;
+        if (!_staleZeroLTPTracker.has(staleKey)) {
+          _staleZeroLTPTracker.set(staleKey, nowMs);
+          console.warn(`[AutoTrader-Srv] ⚠ Zero LTP for trade ${pos.id} on ${page}. Starting 3-min force-exit timer.`);
+        } else {
+          const staleDuration = nowMs - (_staleZeroLTPTracker.get(staleKey) || nowMs);
+          if (staleDuration > 3 * 60 * 1000) {
+            // Force exit at stop_loss price to prevent full wipeout
+            const forceExitPrice = Math.max(pos.stop_loss, pos.entry_price * 0.3); // at least 30% of entry
+            const forceExitPnl = (forceExitPrice - pos.entry_price) * pos.qty * pos.lot_size;
+            const success = pos.isShadow
+              ? closeShadowTrade(pos.id, parseFloat(forceExitPrice.toFixed(1)), parseFloat(forceExitPnl.toFixed(1)))
+              : await closePaperAndLinkedRealTrade(pos, forceExitPrice, forceExitPnl, "FORCE_EXIT", io);
+            _staleZeroLTPTracker.delete(staleKey);
+            if (success) {
+              console.error(`[AutoTrader-Srv] 🔴 FORCE EXIT (3min zero LTP) for trade ${pos.id} on ${page} at ₹${forceExitPrice.toFixed(1)} PnL: ₹${forceExitPnl.toFixed(1)}`);
+              globalBus.addLog(`FORCE EXIT: ${page} ${pos.direction} — LTP unavailable 3+ min. Exited @ ₹${forceExitPrice.toFixed(1)}`, "warn");
+            }
+          } else {
+            console.warn(`[AutoTrader-Srv] ⚠ Zero LTP for ${pos.id} (${Math.round(staleDuration/1000)}s). Will force-exit at 3min.`);
+          }
+        }
         continue;
       }
+      // Clear stale tracker if LTP is now valid
+      _staleZeroLTPTracker.delete(pos.id);
 
       // ── 2a. DYNAMIC DELTA-ADJUSTED TRAILING STOP LOSS ──
       const premiumGain = currentPremium - pos.entry_price;
@@ -1471,11 +1590,22 @@ export async function runServerSideAutoTrading(
         exitReason = "TARGET HIT";
       }
 
+      // ── HARD MAX-LOSS CAP: Always check, independent of other exits ──
+      // Exit if premium drops >= 45% below entry (prevents full wipeout from feed issues)
+      if (!shouldExit) {
+        const hardLossPct = (currentPremium - pos.entry_price) / pos.entry_price;
+        if (hardLossPct <= -0.45) {
+          shouldExit = true;
+          exitReason = `HARD STOP: Premium dropped ${(hardLossPct*100).toFixed(0)}% — wipeout prevention`;
+          console.error(`[AutoTrader-Srv] 🔴 HARD STOP triggered for ${pos.id} on ${page}: entry ₹${pos.entry_price} now ₹${currentPremium.toFixed(1)} (${(hardLossPct*100).toFixed(0)}%)`);
+        }
+      }
+
       if (shouldExit) {
         const exitPnl = (currentPremium - pos.entry_price) * pos.qty * pos.lot_size;
         const success = pos.isShadow
           ? closeShadowTrade(pos.id, parseFloat(currentPremium.toFixed(1)), parseFloat(exitPnl.toFixed(1)))
-          : closePaperTrade(pos.id, parseFloat(currentPremium.toFixed(1)), parseFloat(exitPnl.toFixed(1)));
+          : await closePaperAndLinkedRealTrade(pos, currentPremium, exitPnl, exitReason, io);
         
         if (success) {
           console.log(`[AutoTrader-Srv] ${pos.isShadow ? "[SHADOW] " : ""}Closed open trade ${pos.id} on ${page}: ${exitReason} at premium ${currentPremium.toFixed(1)}, PnL: ₹${exitPnl.toFixed(1)}`);
@@ -1695,7 +1825,8 @@ export async function runServerSideAutoTrading(
       isReversalPE = true;
     }
 
-    const isWeightedAligned = true; // Bypass strict stock divergence check to prevent deadlocks in live market
+    // Paper trades: allow all signals (OI Brain filters real trades separately)
+    const isWeightedAligned = true;
 
     // Log weighted signal for diagnostics
     if (!isWeightedAligned) {
@@ -1785,7 +1916,9 @@ export async function runServerSideAutoTrading(
     // ── IQ200+: Confidence threshold — ALWAYS TAKE TRADE ─────────────────────
     // Base = 0: any signal with any confidence triggers a trade
     // The momentum tier determines the SIZE/TARGET of the trade, not whether to take it
-    const adaptiveThreshold = 0; // IQ200+: Always fire — momentum tier handles risk
+    // Paper threshold: 0 — all signals go to paper trade
+    // Real trade filtering is done separately via OI Brain Engine
+    const adaptiveThreshold = 0;
 
     // IQ200+: ALL SIGNALS FIRE — no confidence gate
     // Momentum tier handles the risk — MICRO gets tiny target/SL, STRONG gets big target/SL
@@ -1923,14 +2056,14 @@ export async function runServerSideAutoTrading(
       const lastNotes = (() => { try { return JSON.parse(lastClosedIntraday.notes || "{}"); } catch { return {}; } })();
       const lastExitReason: string = lastNotes.exit_reason || "";
 
-      // IQ200+: Berserker cooldown based on what happened last
-      let BERSERKER_COOLDOWN_MS = 12 * 1000; // Default: 12 seconds
+      // Balanced cooldowns — paper trades active, not too aggressive
+      let BERSERKER_COOLDOWN_MS = 30 * 1000; // 30s default (was 12s — too fast, 90s — too slow)
       if (lastExitReason.includes("TARGET HIT")) {
-        BERSERKER_COOLDOWN_MS = 8 * 1000;   // Quick re-entry on win
+        BERSERKER_COOLDOWN_MS = 20 * 1000;   // 20s after win
       } else if (lastExitReason.includes("STOP LOSS HIT")) {
-        BERSERKER_COOLDOWN_MS = 20 * 1000;  // Slight pause after loss
+        BERSERKER_COOLDOWN_MS = 60 * 1000;   // 60s after SL — short pause
       } else if (lastExitReason.includes("THETA DECAY") || lastExitReason.includes("IV CRUSH")) {
-        BERSERKER_COOLDOWN_MS = 40 * 1000;  // Momentum truly gone — wait
+        BERSERKER_COOLDOWN_MS = 90 * 1000;   // 90s after decay — sideways market
       }
 
       if (msSinceClose < BERSERKER_COOLDOWN_MS) {
@@ -2032,8 +2165,7 @@ export async function runServerSideAutoTrading(
         break positionalBlock;
       }
 
-      const positionalConfThreshold = consensus.isPromoted ? 50 : 35; // IQ 200: relaxed to 50 for real, 35 for sandbox shadow to gather training data
-      const positionalConfOk = antigravity.confidence >= positionalConfThreshold;
+      const positionalConfOk = antigravity.confidence >= 60; // SWING MODE: 60% confidence enough — trend alignment is the primary gate
       
       const overallTrend = report.trend.overall.toUpperCase();
       const isBullTrend = overallTrend.includes("BULLISH");
@@ -2046,65 +2178,37 @@ export async function runServerSideAutoTrading(
       const vixNow = marketState.niftyOptionChain.indiaVix || 15;
       const vixOk = vixNow < 22; // Block if VIX is dangerously high (crash impending)
       
-      if (!positionalConfOk || !trendAligned || !vixOk) {
-        const nowLog = Date.now();
-        if (nowLog - (lastCooldownLog[`${page}-POS-GATES`] || 0) > 60000) {
-          console.log(`[AutoTrader-Srv] [POSITIONAL SKIP] ${page} Gates: positionalConfOk: ${positionalConfOk} (Conf: ${antigravity.confidence} vs threshold: ${positionalConfThreshold}), trendAligned: ${trendAligned} (Signal: ${antigravity.finalSignal}, Trend: ${overallTrend}), vixOk: ${vixOk} (VIX: ${vixNow} vs 22)`);
-          lastCooldownLog[`${page}-POS-GATES`] = nowLog;
-        }
-        break positionalBlock;
-      }
+      if (positionalConfOk && trendAligned && vixOk) {
+        // Cooldown check for positional (longer: 10 minutes)
+        const POS_COOLDOWN_MS = 5 * 60 * 1000; // SWING MODE: 5 min cooldown (was 10 min) — catch more swing windows
+        const lastClosedReal = getPositionTrades("CLOSED_PROFIT").concat(getPositionTrades("CLOSED_LOSS")).sort((a, b) => b.updatedAt - a.updatedAt).find(t => t.instrument === page);
+        const lastClosedShadow = getShadowTrades("CLOSED").sort((a, b) => (b.closed_at || 0) - (a.closed_at || 0)).find(t => {
+          try {
+            return t.instrument === page && JSON.parse(t.notes || "{}").trade_type === "POSITIONAL";
+          } catch { return false; }
+        });
+        
+        const msSinceClosedReal = lastClosedReal ? (Date.now() - lastClosedReal.updatedAt) : Infinity;
+        const msSinceClosedShadow = lastClosedShadow && lastClosedShadow.closed_at ? (Date.now() - lastClosedShadow.closed_at) : Infinity;
+        const onCooldown = Math.min(msSinceClosedReal, msSinceClosedShadow) < POS_COOLDOWN_MS;
 
-      // Cooldown check for positional (longer: 10 minutes)
-      const POS_COOLDOWN_MS = 10 * 60 * 1000;
-      const lastClosedReal = getPositionTrades("CLOSED_PROFIT").concat(getPositionTrades("CLOSED_LOSS")).sort((a, b) => b.updatedAt - a.updatedAt).find(t => t.instrument === page);
-      const lastClosedShadow = getShadowTrades("CLOSED").sort((a, b) => (b.closed_at || 0) - (a.closed_at || 0)).find(t => {
-        try {
-          return t.instrument === page && JSON.parse(t.notes || "{}").trade_type === "POSITIONAL";
-        } catch { return false; }
-      });
-      
-      const msSinceClosedReal = lastClosedReal ? (Date.now() - lastClosedReal.updatedAt) : Infinity;
-      const msSinceClosedShadow = lastClosedShadow && lastClosedShadow.closed_at ? (Date.now() - lastClosedShadow.closed_at) : Infinity;
-      const onCooldown = Math.min(msSinceClosedReal, msSinceClosedShadow) < POS_COOLDOWN_MS;
-
-      if (onCooldown) {
-        const nowLog = Date.now();
-        if (nowLog - (lastCooldownLog[`${page}-POS-COOLDOWN`] || 0) > 60000) {
-          console.log(`[AutoTrader-Srv] [POSITIONAL SKIP] ${page} is on cooldown. Last Real: ${msSinceClosedReal.toFixed(0)}ms, Last Shadow: ${msSinceClosedShadow.toFixed(0)}ms`);
-          lastCooldownLog[`${page}-POS-COOLDOWN`] = nowLog;
-        }
-        break positionalBlock;
-      }
-
-      // If Promoted -> Live Positional Trade (saved to position_trades.json)
-      if (consensus.isPromoted) {
-        const canPyramidReal = getPositionTrades("ACTIVE").some(t => t.instrument === page && t.unrealizedPnL > (t.totalPremium * 0.5));
-        if (activeRealPositionalCount < MAX_REAL_POSITION_TRADES || canPyramidReal) {
-          console.log(`[AutoTrader-Srv] 🎯 TRIGGERING REAL POSITIONAL TRADE FOR ${page} at spot ${spotPrice}`);
-          triggerAutoTrade(page, spotPrice, strikes, antigravity, alignment, report, momentum, breakout, "POSITIONAL", io, false, undefined, false, aiEngineV2).catch(e => {
-            console.error(`[AutoTrader-Srv] [POSITIONAL REAL Entry Error] [${page}]`, e.message);
-          });
-        } else {
-          const nowLog = Date.now();
-          if (nowLog - (lastCooldownLog[`${page}-POS-REAL-CAP`] || 0) > 60000) {
-            console.log(`[AutoTrader-Srv] [POSITIONAL SKIP] ${page} REAL capacity full: ${activeRealPositionalCount}/${MAX_REAL_POSITION_TRADES}. Pyramid: ${canPyramidReal}`);
-            lastCooldownLog[`${page}-POS-REAL-CAP`] = nowLog;
+        if (!onCooldown) {
+          // ── SWING FUND MODE: Always trigger REAL positional trade (isPromoted bypass) ──
+          // Shadow/Sandbox check removed — ₹60,000 swing fund se real trade lo hamesha
+          // Self-learning shadow trade bhi parallel mein chalta hai training ke liye
+          const canPyramidReal = getPositionTrades("ACTIVE").some(t => t.instrument === page && t.unrealizedPnL > (t.totalPremium * 0.5));
+          if (activeRealPositionalCount < MAX_REAL_POSITION_TRADES || canPyramidReal) {
+            console.log(`[AutoTrader-Srv] 🚀 SWING FUND TRIGGER: ${page} ${antigravity.finalSignal} | Conf: ${antigravity.confidence}% | Trend: ${report.trend.overall} | VIX: ${marketState.niftyOptionChain.indiaVix?.toFixed(1)}`);
+            triggerAutoTrade(page, spotPrice, strikes, antigravity, alignment, report, momentum, breakout, "POSITIONAL", io, false, undefined, false, aiEngineV2).catch(e => {
+              console.error(`[AutoTrader-Srv] [POSITIONAL REAL Entry Error] [${page}]`, e.message);
+            });
           }
-        }
-      } else {
-        // If Sandbox/Not Promoted -> Background Journal Positional Trade (saved to te_shadow_trades)
-        const canPyramidShadow = getShadowTrades("OPEN").some(t => { try { return t.instrument === page && JSON.parse(t.notes || "{}").trade_type === "POSITIONAL" && (t.latest_ltp || 0) > (t.entry_price || 0) * 1.5; } catch { return false; } });
-        if (activeShadowPositionalCount < MAX_SHADOW_POSITION_TRADES || canPyramidShadow) {
-          console.log(`[AutoTrader-Srv] 🎯 TRIGGERING SHADOW POSITIONAL TRADE FOR ${page} at spot ${spotPrice}`);
-          triggerAutoTrade(page, spotPrice, strikes, antigravity, alignment, report, momentum, breakout, "POSITIONAL", io, false, undefined, true, aiEngineV2).catch(e => {
-            console.error(`[AutoTrader-Srv] [POSITIONAL SHADOW Entry Error] [${page}]`, e.message);
-          });
-        } else {
-          const nowLog = Date.now();
-          if (nowLog - (lastCooldownLog[`${page}-POS-SHAD-CAP`] || 0) > 60000) {
-            console.log(`[AutoTrader-Srv] [POSITIONAL SKIP] ${page} SHADOW capacity full: ${activeShadowPositionalCount}/${MAX_SHADOW_POSITION_TRADES}. Pyramid: ${canPyramidShadow}`);
-            lastCooldownLog[`${page}-POS-SHAD-CAP`] = nowLog;
+          // Parallel shadow trade for self-learning data collection
+          const canPyramidShadow = getShadowTrades("OPEN").some(t => { try { return t.instrument === page && JSON.parse(t.notes || "{}").trade_type === "POSITIONAL" && (t.latest_ltp || 0) > (t.entry_price || 0) * 1.5; } catch { return false; } });
+          if (activeShadowPositionalCount < MAX_SHADOW_POSITION_TRADES || canPyramidShadow) {
+            triggerAutoTrade(page, spotPrice, strikes, antigravity, alignment, report, momentum, breakout, "POSITIONAL", io, false, undefined, true, aiEngineV2).catch(e => {
+              console.error(`[AutoTrader-Srv] [POSITIONAL SHADOW Entry Error] [${page}]`, e.message);
+            });
           }
         }
       }

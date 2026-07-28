@@ -19,10 +19,10 @@ import { globalBus } from "./globalDataBus.js";
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 const GOVERNOR_CONFIG = {
-  maxDailyLoss:        -25000,  // ₹ paper loss limit per day (increased for testing)
-  consecutiveLossMax:  5,       // Halt after N consecutive losses (relaxed for testing)
-  consecutiveCooldownMs: 5 * 60 * 1000, // 5 min cooldown (shorter for testing)
-  vixHardGate:         25,      // VIX above this → pause buying
+  maxDailyLoss:        -25000,  // ₹ paper loss limit per day (raised for paper trading)
+  consecutiveLossMax:  3,       // Halt after N consecutive losses
+  consecutiveCooldownMs: 30 * 60 * 1000, // 30 min cooldown
+  vixHardGate:         35,      // VIX above this → pause buying (raised to 35)
   healthCheckIntervalMs: 10000, // Broadcast every 10s
 };
 
@@ -120,9 +120,13 @@ class GovernorService {
     const db = this.getDB();
     if (!db) return { pnl: 0, wins: 0, losses: 0, consecutiveLosses: 0 };
     try {
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      const ts = todayStart.getTime();
+      // Fix: Use IST midnight (UTC+5:30) not local server midnight
+      // IST offset = 5.5 * 3600 * 1000 ms
+      const IST_OFFSET = 5.5 * 3600 * 1000;
+      const nowIST = new Date(Date.now() + IST_OFFSET);
+      const istDateStr = nowIST.toISOString().slice(0, 10); // "YYYY-MM-DD" in IST
+      const istMidnightUTC = new Date(`${istDateStr}T00:00:00.000+05:30`).getTime();
+      const ts = istMidnightUTC;
 
       const rows = db.prepare(`
         SELECT pnl FROM te_paper_trades

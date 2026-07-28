@@ -303,8 +303,14 @@ const ModeTag: React.FC<{ mode: StrategyMode }> = ({ mode }) => (
 
 // ── Strategy Card (registry view) ─────────────────────────────────────────────
 
-const StrategyCard: React.FC<{ strategy: StrategyDefinition; isSelected: boolean; isCandidate: boolean; score?: number }> = ({
-  strategy, isSelected, isCandidate, score
+const StrategyCard: React.FC<{
+  strategy: StrategyDefinition;
+  isSelected: boolean;
+  isCandidate: boolean;
+  score?: number;
+  todayStats?: { trades: number; pnl: number };
+}> = ({
+  strategy, isSelected, isCandidate, score, todayStats
 }) => {
   const [expanded, setExpanded] = useState(false);
   const borderColor = isSelected ? "border-indigo-500/60" : isCandidate ? "border-emerald-500/30" : "border-slate-800/40";
@@ -336,6 +342,15 @@ const StrategyCard: React.FC<{ strategy: StrategyDefinition; isSelected: boolean
           <div className="text-[9px] text-slate-500 font-mono mt-0.5 truncate">{strategy.description}</div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          {todayStats && todayStats.trades > 0 && (
+            <span className={`text-[9px] font-black font-mono px-2 py-0.5 rounded ${
+              todayStats.pnl >= 0
+                ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
+                : "bg-rose-500/15 text-rose-400 border border-rose-500/20"
+            }`}>
+              Today: {todayStats.trades}T ({todayStats.pnl >= 0 ? "+" : ""}₹{todayStats.pnl.toFixed(0)})
+            </span>
+          )}
           {score !== undefined && (
             <span className="text-[10px] font-black text-amber-400 font-mono">{score}</span>
           )}
@@ -817,6 +832,73 @@ const AutoStrategyTab: React.FC<AutoStrategyTabProps> = (props) => {
           }
         });
         setDbHistory(stratTrades);
+
+        // Filter and sync today's trades to state.closedToday, state.dailyPnl, and state.strategyStats
+        const todayIST = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+        const todayClosed = stratTrades.filter((t: any) => {
+          const tradeTime = t.timestamp || t.created_at || 0;
+          const tradeDate = new Date(tradeTime + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+          return tradeDate === todayIST;
+        });
+
+        const todayMapped: ActivePosition[] = todayClosed.map((t: any) => {
+          const pos = mapDbTradeToActivePosition(t);
+          return {
+            ...pos,
+            realizedPnl: t.pnl ?? pos.unrealizedPnl,
+            pnl: t.pnl ?? pos.unrealizedPnl,
+          } as ActivePosition;
+        });
+
+        const todayPnl = todayMapped.reduce((s: number, t: any) => s + (t.realizedPnl ?? 0), 0);
+
+        const stratStats: Record<string, StrategyStats> = {};
+        todayMapped.forEach((t: any) => {
+          if (!t.strategyId) return;
+          if (!stratStats[t.strategyId]) {
+            stratStats[t.strategyId] = { trades: 0, wins: 0, losses: 0, totalPnl: 0, avgPnl: 0, winRate: 0 };
+          }
+          const s = stratStats[t.strategyId];
+          s.trades++;
+          if ((t.realizedPnl ?? 0) >= 0) s.wins++; else s.losses++;
+          s.totalPnl += (t.realizedPnl ?? 0);
+        });
+        Object.keys(stratStats).forEach(sid => {
+          const s = stratStats[sid];
+          s.winRate = s.trades > 0 ? (s.wins / s.trades) * 100 : 0;
+          s.avgPnl = s.trades > 0 ? s.totalPnl / s.trades : 0;
+        });
+
+        setState(prev => {
+          const existingIds = new Set(todayMapped.map((t: any) => t.id));
+          const newInMemoryClosed = prev.closedToday.filter(x => !existingIds.has(x.id));
+          const mergedClosed = [...todayMapped, ...newInMemoryClosed];
+          const mergedPnl = todayPnl + newInMemoryClosed.reduce((s, x) => s + (x.realizedPnl ?? 0), 0);
+
+          const mergedStats = { ...stratStats };
+          newInMemoryClosed.forEach(x => {
+            if (!x.strategyId) return;
+            if (!mergedStats[x.strategyId]) {
+              mergedStats[x.strategyId] = { trades: 0, wins: 0, losses: 0, totalPnl: 0, avgPnl: 0, winRate: 0 };
+            }
+            const s = mergedStats[x.strategyId];
+            s.trades++;
+            if ((x.realizedPnl ?? 0) >= 0) s.wins++; else s.losses++;
+            s.totalPnl += (x.realizedPnl ?? 0);
+          });
+          Object.keys(mergedStats).forEach(sid => {
+            const s = mergedStats[sid];
+            s.winRate = s.trades > 0 ? (s.wins / s.trades) * 100 : 0;
+            s.avgPnl = s.trades > 0 ? s.totalPnl / s.trades : 0;
+          });
+
+          return {
+            ...prev,
+            closedToday: mergedClosed,
+            dailyPnl: mergedPnl,
+            strategyStats: mergedStats,
+          };
+        });
       }
     } catch (_) {}
   }, []);
@@ -1140,13 +1222,17 @@ const AutoStrategyTab: React.FC<AutoStrategyTabProps> = (props) => {
     props.socket.on("autotrade-status-update", handleStatusUpdate);
     props.socket.on("score-momentum-update", handleMomentumUpdate);
     props.socket.on("micro-scalp-status-update", handleMicroScalpUpdate);
+    props.socket.on("paper-trade-closed", loadDbHistory);
+    props.socket.on("paper-trade-opened", loadDbHistory);
 
     return () => {
       props.socket.off("autotrade-status-update", handleStatusUpdate);
       props.socket.off("score-momentum-update", handleMomentumUpdate);
       props.socket.off("micro-scalp-status-update", handleMicroScalpUpdate);
+      props.socket.off("paper-trade-closed", loadDbHistory);
+      props.socket.off("paper-trade-opened", loadDbHistory);
     };
-  }, [props.socket, props.indexSymbol]);
+  }, [props.socket, props.indexSymbol, loadDbHistory]);
 
   const updateServerConfig = useCallback(async (cfgPatch: any) => {
     const isLocal = typeof window !== "undefined" && (window.location.port === "5173" || window.location.protocol === "file:");
@@ -1862,6 +1948,7 @@ const AutoStrategyTab: React.FC<AutoStrategyTabProps> = (props) => {
                 isSelected={state.selectedStrategyId === strategy.id}
                 isCandidate={candidateIds.has(strategy.id)}
                 score={state.candidateStrategies.find(c => c && c.id === strategy.id)?.score}
+                todayStats={state.strategyStats[strategy.id] ? { trades: state.strategyStats[strategy.id].trades, pnl: state.strategyStats[strategy.id].totalPnl } : undefined}
               />
             ))}
           </div>
@@ -1905,6 +1992,7 @@ const AutoStrategyTab: React.FC<AutoStrategyTabProps> = (props) => {
                 isSelected={state.selectedStrategyId === strategy.id}
                 isCandidate={candidateIds.has(strategy.id)}
                 score={state.candidateStrategies.find(c => c && c.id === strategy.id)?.score}
+                todayStats={state.strategyStats[strategy.id] ? { trades: state.strategyStats[strategy.id].trades, pnl: state.strategyStats[strategy.id].totalPnl } : undefined}
               />
             ))}
           </div>

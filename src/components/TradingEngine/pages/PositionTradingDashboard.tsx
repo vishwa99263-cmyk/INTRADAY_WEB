@@ -119,18 +119,18 @@ interface SignalStats {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const BIAS_CONFIG = {
-  STRONG_BULL: { color: "#10b981", bg: "rgba(16,185,129,0.12)", label: "🟢 STRONG BULL", glow: "0 0 20px rgba(16,185,129,0.3)" },
-  BULL:        { color: "#34d399", bg: "rgba(52,211,153,0.08)",  label: "🟢 BULL",        glow: "0 0 12px rgba(52,211,153,0.2)" },
-  NEUTRAL:     { color: "#94a3b8", bg: "rgba(148,163,184,0.08)", label: "⚪ NEUTRAL",     glow: "none" },
-  BEAR:        { color: "#f97316", bg: "rgba(249,115,22,0.08)",  label: "🟠 BEAR",        glow: "0 0 12px rgba(249,115,22,0.2)" },
-  STRONG_BEAR: { color: "#ef4444", bg: "rgba(239,68,68,0.12)",   label: "🔴 STRONG BEAR", glow: "0 0 20px rgba(239,68,68,0.3)" },
+  STRONG_BULL: { color: "#10b981", bg: "rgba(16,185,129,0.08)", label: "🟢 STRONG BULL", glow: "0 0 16px rgba(16,185,129,0.25)" },
+  BULL:        { color: "#34d399", bg: "rgba(52,211,153,0.05)",  label: "🟢 BULL",        glow: "0 0 10px rgba(52,211,153,0.15)" },
+  NEUTRAL:     { color: "#94a3b8", bg: "rgba(148,163,184,0.04)", label: "⚪ NEUTRAL",     glow: "none" },
+  BEAR:        { color: "#f97316", bg: "rgba(249,115,22,0.05)",  label: "🟠 BEAR",        glow: "0 0 10px rgba(249,115,22,0.15)" },
+  STRONG_BEAR: { color: "#f43f5e", bg: "rgba(244,63,94,0.08)",   label: "🔴 STRONG BEAR", glow: "0 0 16px rgba(244,63,94,0.25)" },
 } as const;
 
 const VIX_CONFIG = {
   LOW:     { color: "#10b981", label: "LOW ✅ Cheap Premiums",     pct: 25 },
   NORMAL:  { color: "#3b82f6", label: "NORMAL ✅ Good to Trade",   pct: 50 },
   HIGH:    { color: "#f97316", label: "HIGH ⚠️ Reduce Size",       pct: 75 },
-  EXTREME: { color: "#ef4444", label: "EXTREME ❌ Avoid Buying",   pct: 100 },
+  EXTREME: { color: "#f43f5e", label: "EXTREME ❌ Avoid Buying",   pct: 100 },
 } as const;
 
 function fmt(n: number, dec = 0) { return n?.toFixed(dec) ?? "—"; }
@@ -251,53 +251,68 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
     return () => clearInterval(interval);
   }, [fetchAll]);
 
-  // Calculate setup
+  // Setup calculation handler
   const handleCalcSetup = async () => {
-    if (!calcForm.entryPrice || calcForm.entryPrice <= 0) return;
+    if (!calcForm.entryPrice) return;
     setCalcLoading(true);
     try {
-      const activeSpot = spotPrice || swingLevels?.spot || 0;
-      const calculatedStrike = calcForm.strike || getAtmStrike(activeSpot, inst);
-
-      const res = await fetch(getApiUrl("/api/position-trades/calc-setup"), {
+      const strikeVal = calcForm.strike > 0 ? calcForm.strike : getAtmStrike(spotPrice, inst);
+      const res = await fetch(getApiUrl(`/api/position-trades/plan`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           instrument: inst,
           direction: calcForm.direction,
-          strike: calculatedStrike,
-          expiry: calcForm.expiry || "Next Week",
+          strike: strikeVal,
+          expiry: calcForm.expiry,
           entryPrice: calcForm.entryPrice,
           lots: calcForm.lots,
-          daysToExpiry: calcForm.daysToExpiry,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) setCalcResult(data.setup);
+          daysToExpiry: calcForm.daysToExpiry
+        })
+      }).then(r => r.json());
+
+      if (res.success) {
+        setCalcResult(res.setup);
+      }
+    } catch (e) {
+      console.error("[PositionDashboard] Calc error:", e);
     } finally {
       setCalcLoading(false);
     }
   };
 
-  // Open position trade
+  // Open position submission
   const handleOpenTrade = async () => {
     if (!calcResult) return;
     try {
-      const res = await fetch(getApiUrl("/api/position-trades"), {
+      const res = await fetch(getApiUrl(`/api/position-trades`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(calcResult),
-      });
-      const data = await res.json();
-      if (data.success) {
+        body: JSON.stringify({
+          instrument: calcResult.instrument,
+          direction: calcResult.direction,
+          strike: calcResult.strike,
+          expiry: calcResult.expiry,
+          entryPrice: calcResult.entryPrice,
+          lots: calcResult.lots,
+          slPrice: calcResult.slPrice,
+          target1: calcResult.target1,
+          target2: calcResult.target2,
+          reasoning: calcResult.reasoning
+        })
+      }).then(r => r.json());
+
+      if (res.success) {
         setOpenTradeModal(false);
         setCalcResult(null);
+        setCalcForm(f => ({ ...f, entryPrice: 0 }));
         fetchAll();
       }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error("[PositionDashboard] Open trade error:", e);
+    }
   };
 
-  // Close trade
   const handleCloseTrade = async (id: string, currentPrice: number) => {
     setClosingId(id);
     try {
@@ -313,28 +328,28 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
   const bias = dailyBias ? BIAS_CONFIG[dailyBias.bias] : null;
 
   return (
-    <div className="bg-[#040811] text-slate-200 p-3 space-y-3 rounded-xl border border-slate-800/40">
+    <div className="bg-[#03060c]/95 text-slate-200 p-2 space-y-2 rounded-lg border border-slate-900 shadow-xl select-none font-sans">
 
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
+      {/* ── Header (Ultra Compact) ─────────────────────────────────────────── */}
+      <div className="flex items-center justify-between pb-1 border-b border-slate-900/60">
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-md shadow-emerald-500/20">
-            <TrendingUp size={12} className="text-white" />
+          <div className="w-5 h-5 rounded bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow shadow-emerald-500/25">
+            <TrendingUp size={11} className="text-white" />
           </div>
-          <span className="text-[13px] font-black text-white tracking-wide uppercase">Swing Position</span>
-          <span className="text-[10px] text-slate-500 font-mono">· 2-5 Days Hold</span>
+          <span className="text-[12.5px] font-black text-white tracking-wider uppercase">SWING POSITION</span>
+          <span className="text-[9px] text-slate-500 font-mono tracking-wide">- 2-5 Days Hold</span>
         </div>
 
         {/* Instrument Tabs */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
           {(["NIFTY", "BANKNIFTY", "SENSEX"] as Instrument[]).map(i => (
             <button
               key={i}
               onClick={() => setInst(i)}
-              className={`px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wider transition-all ${
+              className={`px-2 py-0.5 rounded text-[9.5px] font-black tracking-wider transition-all duration-200 ${
                 inst === i
-                  ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30"
-                  : "bg-slate-800/60 text-slate-400 hover:text-white hover:bg-slate-700/60"
+                  ? "bg-emerald-600 text-white shadow shadow-emerald-600/25"
+                  : "bg-slate-900/80 text-slate-400 hover:text-white hover:bg-slate-800"
               }`}
             >
               {i === "BANKNIFTY" ? "BNIFTY" : i}
@@ -343,50 +358,48 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
           <button
             onClick={fetchAll}
             disabled={loading}
-            className="ml-1 p-1 rounded-lg bg-slate-800/60 text-slate-400 hover:text-white transition-all"
+            className="ml-1 p-0.5 rounded bg-slate-900/80 text-slate-400 hover:text-white transition-all"
             title="Refresh"
           >
-            <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+            <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
           </button>
         </div>
       </div>
 
-      {/* ── Active Position Trades (MOVED TO TOP) ─────────────────────────── */}
-      <div className="rounded-xl border border-indigo-500/20 bg-gradient-to-br from-slate-900/80 via-[#0c1225]/90 to-slate-900/80 p-4 shadow-lg shadow-indigo-500/5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-2">
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-md shadow-indigo-500/30">
-                <Activity size={12} className="text-white" />
-              </div>
-              <span className="text-xs font-black text-white uppercase tracking-widest hidden sm:block">Swing Dashboard</span>
+      {/* ── Active Position Trades (Sleek Glass Card) ────────────────────── */}
+      <div className="rounded-lg border border-indigo-500/15 bg-gradient-to-br from-slate-950 via-[#0a0f1e]/80 to-slate-950 p-2.5 shadow">
+        <div className="flex items-center justify-between mb-2 gap-1">
+          <div className="flex items-center gap-2">
+            <div className="w-5 h-5 rounded bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow shadow-indigo-500/25">
+              <Activity size={11} className="text-white" />
             </div>
-            
-            <div className="flex bg-slate-800/50 p-0.5 rounded-lg border border-slate-700/50">
-              <button
-                onClick={() => setActiveTab("ACTIVE")}
-                className={`px-3 py-1 text-[10px] font-black rounded-md transition-all flex items-center gap-1 ${
-                  activeTab === "ACTIVE" ? "bg-indigo-500 text-white shadow-md" : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/50"
-                }`}
-              >
-                LIVE {trades.length > 0 && <span className="bg-white/20 px-1.5 rounded">{trades.length}</span>}
-              </button>
-              <button
-                onClick={() => setActiveTab("JOURNAL")}
-                className={`px-3 py-1 text-[10px] font-black rounded-md transition-all flex items-center gap-1 ${
-                  activeTab === "JOURNAL" ? "bg-slate-600 text-white shadow-md" : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/50"
-                }`}
-              >
-                JOURNAL {shadowTrades.length > 0 && <span className="bg-white/20 px-1.5 rounded">{shadowTrades.length}</span>}
-              </button>
-            </div>
+            <span className="text-[11.5px] font-black text-white uppercase tracking-wider">SWING DASHBOARD</span>
+          </div>
+          
+          <div className="flex bg-slate-950/80 p-0.5 rounded border border-slate-900/80">
+            <button
+              onClick={() => setActiveTab("ACTIVE")}
+              className={`px-2 py-0.5 text-[9px] font-black rounded transition-all ${
+                activeTab === "ACTIVE" ? "bg-indigo-650 text-white shadow" : "text-slate-450 hover:text-slate-200"
+              }`}
+            >
+              LIVE {trades.length > 0 && <span className="bg-white/20 px-1 rounded text-[8px]">{trades.length}</span>}
+            </button>
+            <button
+              onClick={() => setActiveTab("JOURNAL")}
+              className={`px-2 py-0.5 text-[9px] font-black rounded transition-all ${
+                activeTab === "JOURNAL" ? "bg-slate-700 text-white shadow" : "text-slate-450 hover:text-slate-200"
+              }`}
+            >
+              JOURNAL {shadowTrades.length > 0 && <span className="bg-white/20 px-1 rounded text-[8px]">{shadowTrades.length}</span>}
+            </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center">
             {activeTab === "ACTIVE" && trades.length > 0 && (() => {
               const totalPnl = trades.reduce((acc, t) => acc + t.unrealizedPnL, 0);
               return (
-                <span className={`text-sm font-black px-2 py-0.5 rounded-lg ${totalPnl >= 0 ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/15 text-red-400 border border-red-500/20'}`}>
+                <span className={`text-[11.5px] font-black px-1.5 py-0.2 rounded border ${totalPnl >= 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-450 border-rose-500/20'}`}>
                   Net: {fmtPnl(totalPnl)}
                 </span>
               );
@@ -394,7 +407,7 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
             {activeTab === "JOURNAL" && shadowTrades.length > 0 && (() => {
               const totalPnl = shadowTrades.reduce((acc, t) => acc + (t.pnl || 0), 0);
               return (
-                <span className={`text-sm font-black px-2 py-0.5 rounded-lg ${totalPnl >= 0 ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/15 text-red-400 border border-red-500/20'}`}>
+                <span className={`text-[11.5px] font-black px-1.5 py-0.2 rounded border ${totalPnl >= 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-450 border-rose-500/20'}`}>
                   Data Net: {fmtPnl(totalPnl)}
                 </span>
               );
@@ -404,56 +417,58 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
 
         {activeTab === "ACTIVE" && (
           trades.length === 0 ? (
-            <div className="text-center py-4 text-slate-600">
-              <Target size={28} className="mx-auto mb-1.5 opacity-30" />
-              <p className="text-xs">No active swing trades for {inst}</p>
+            <div className="text-center py-3.5 text-slate-650 flex flex-col items-center justify-center border border-dashed border-slate-900 rounded bg-slate-950/20">
+              <Target size={18} className="mb-1 opacity-20" />
+              <p className="text-[10px] font-bold uppercase tracking-wider">No active swing trades for {inst}</p>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {trades.map(trade => {
-                const pnlColor = trade.unrealizedPnL >= 0 ? "#10b981" : "#ef4444";
+                const pnlColor = trade.unrealizedPnL >= 0 ? "#10b981" : "#f43f5e";
                 const pnlPct = trade.entryPrice > 0 ? ((trade.currentPrice - trade.entryPrice) / trade.entryPrice * 100).toFixed(1) : "0";
                 const isBreakeven = trade.trailSl >= trade.entryPrice;
 
                 return (
-                  <div key={trade.id} className="bg-slate-950/60 rounded-xl border border-indigo-500/30 p-3 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 px-2 py-0.5 bg-indigo-500/20 text-indigo-400 text-[8px] font-black rounded-bl-lg">LIVE</div>
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xs font-black px-2 py-0.5 rounded ${trade.direction === "BUY_CE" ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"}`}>
+                  <div key={trade.id} className="bg-slate-950/80 rounded border border-indigo-950 p-2 relative overflow-hidden transition-all hover:border-indigo-900">
+                    <div className="absolute top-0 right-0 px-1.5 py-0.2 bg-indigo-500/10 text-indigo-400 text-[8px] font-black rounded-bl">LIVE</div>
+                    <div className="flex items-start justify-between mb-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`text-[9px] font-black px-1.5 py-0.2 rounded ${trade.direction === "BUY_CE" ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"}`}>
                           {trade.direction === "BUY_CE" ? "CE ▲" : "PE ▼"}
                         </span>
-                        <span className="text-sm font-black text-white">{trade.instrument}</span>
-                        <span className="text-sm font-bold text-slate-300">{trade.strike}</span>
-                        <span className="text-xs text-slate-500">{trade.expiry}</span>
-                        <span className="text-[10px] text-slate-600 bg-slate-800 px-1.5 py-0.5 rounded">Day {trade.holdDays + 1}</span>
+                        <span className="text-[11.5px] font-black text-white">{trade.instrument}</span>
+                        <span className="text-[11.5px] font-black text-slate-300 font-mono">{trade.strike}</span>
+                        <span className="text-[9.5px] text-slate-500 font-medium font-mono">{trade.expiry}</span>
+                        <span className="text-[9px] text-slate-400 bg-slate-900 px-1 py-0.2 rounded font-mono font-bold">D{trade.holdDays + 1}</span>
                       </div>
-                      <div className="text-right mt-1">
-                        <div className="text-base font-black" style={{ color: pnlColor }}>{fmtPnl(trade.unrealizedPnL)}</div>
-                        <div className="text-[10px]" style={{ color: pnlColor }}>{pnlPct}%</div>
+                      <div className="text-right">
+                        <div className="text-[13.5px] font-black font-mono leading-none" style={{ color: pnlColor }}>{fmtPnl(trade.unrealizedPnL)}</div>
+                        <div className="text-[9.5px] font-mono leading-none mt-0.5 font-bold" style={{ color: pnlColor }}>{pnlPct}%</div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-4 gap-2 mb-2">
+                    
+                    <div className="grid grid-cols-4 gap-1.5 mb-1.5">
                       {[
                         { label: "Entry", value: `₹${fmt(trade.entryPrice, 1)}`, color: "#94a3b8" },
                         { label: "CMP", value: `₹${fmt(trade.currentPrice, 1)}`, color: pnlColor },
-                        { label: `SL ${isBreakeven ? "🔒" : ""}`, value: `₹${fmt(trade.trailSl, 1)}`, color: isBreakeven ? "#f97316" : "#ef4444" },
+                        { label: `SL ${isBreakeven ? "🔒" : ""}`, value: `₹${fmt(trade.trailSl, 1)}`, color: isBreakeven ? "#f97316" : "#f43f5e" },
                         { label: "Target", value: `₹${fmt(trade.target2, 1)}`, color: "#10b981" },
                       ].map(c => (
-                        <div key={c.label} className="bg-slate-800/60 rounded-lg p-1.5 text-center">
-                          <div className="text-[9px] text-slate-500">{c.label}</div>
-                          <div className="text-xs font-black" style={{ color: c.color }}>{c.value}</div>
+                        <div key={c.label} className="bg-slate-900/60 rounded p-1 text-center border border-white/[0.02]">
+                          <div className="text-[8px] text-slate-500 uppercase tracking-wide leading-none mb-0.5">{c.label}</div>
+                          <div className="text-[11px] font-black font-mono" style={{ color: c.color }}>{c.value}</div>
                         </div>
                       ))}
                     </div>
-                    <div className="flex items-center justify-between text-[10px] text-slate-500">
-                      <span>Θ -₹{trade.dailyTheta}/day · Breakeven in {trade.breakevenDays}d</span>
-                      <span>VIX@Entry: {trade.vixAtEntry > 0 ? fmt(trade.vixAtEntry, 1) : "—"} · {trade.dailyBiasAtEntry}</span>
+                    
+                    <div className="flex items-center justify-between text-[9px] text-slate-500 font-mono">
+                      <span>Θ -₹{trade.dailyTheta}/day · Breakeven: {trade.breakevenDays}d</span>
+                      <span>VIX@E: {trade.vixAtEntry > 0 ? fmt(trade.vixAtEntry, 1) : "—"} · {trade.dailyBiasAtEntry}</span>
                     </div>
                     <button
                       onClick={() => handleCloseTrade(trade.id, trade.currentPrice)}
                       disabled={closingId === trade.id}
-                      className="mt-2 w-full py-1.5 rounded-lg bg-indigo-500/10 hover:bg-red-900/40 hover:border-red-500/30 border border-indigo-500/20 text-xs text-indigo-300 hover:text-red-400 font-black transition-all"
+                      className="mt-1.5 w-full py-1 rounded bg-indigo-950/20 hover:bg-rose-950 hover:border-rose-900/40 border border-indigo-900/30 text-[10px] text-indigo-300 hover:text-rose-450 font-black transition-all"
                     >
                       {closingId === trade.id ? "Closing..." : "✕ Close Position"}
                     </button>
@@ -466,15 +481,15 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
 
         {activeTab === "JOURNAL" && (
           shadowTrades.length === 0 ? (
-            <div className="text-center py-4 text-slate-600">
-              <Shield size={28} className="mx-auto mb-1.5 opacity-30" />
-              <p className="text-xs">No shadow trades collecting data for {inst}</p>
+            <div className="text-center py-3.5 text-slate-650 flex flex-col items-center justify-center border border-dashed border-slate-900 rounded bg-slate-950/20">
+              <Shield size={18} className="mb-1 opacity-20" />
+              <p className="text-[10px] font-bold uppercase tracking-wider">No shadow trades collecting data for {inst}</p>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {shadowTrades.map((trade: any) => {
                 const currentPrice = trade.livePrice ?? trade.entry_price;
-                const pnlColor = (trade.pnl || 0) >= 0 ? "#10b981" : "#ef4444";
+                const pnlColor = (trade.pnl || 0) >= 0 ? "#10b981" : "#f43f5e";
                 const pnlPct = trade.entry_price > 0 ? ((currentPrice - trade.entry_price) / trade.entry_price * 100).toFixed(1) : "0";
                 
                 let parsedN: any = {};
@@ -485,39 +500,39 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
                 const holdDays = Math.floor((Date.now() - entryMs) / (24 * 3600 * 1000));
 
                 return (
-                  <div key={trade.id} className="bg-slate-950/40 rounded-xl border border-slate-700/50 border-dashed p-3 relative overflow-hidden grayscale hover:grayscale-0 transition-all opacity-80 hover:opacity-100">
-                    <div className="absolute top-0 right-0 px-2 py-0.5 bg-slate-700/50 text-slate-300 text-[8px] font-black rounded-bl-lg">SHADOW</div>
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xs font-black px-2 py-0.5 rounded ${trade.direction === "BUY_CE" ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"}`}>
+                  <div key={trade.id} className="bg-slate-950/40 rounded border border-slate-900 border-dashed p-2 relative overflow-hidden grayscale hover:grayscale-0 transition-all opacity-85 hover:opacity-100">
+                    <div className="absolute top-0 right-0 px-1.5 py-0.2 bg-slate-800 text-slate-400 text-[8px] font-black rounded-bl">SHADOW</div>
+                    <div className="flex items-start justify-between mb-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`text-[9px] font-black px-1.5 py-0.2 rounded ${trade.direction === "BUY_CE" ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-450"}`}>
                           {trade.direction === "BUY_CE" ? "CE ▲" : "PE ▼"}
                         </span>
-                        <span className="text-sm font-black text-slate-400">{trade.instrument}</span>
-                        <span className="text-sm font-bold text-slate-500">{trade.strike}</span>
-                        <span className="text-xs text-slate-600">{expiry}</span>
-                        <span className="text-[10px] text-slate-600 bg-slate-800/50 px-1.5 py-0.5 rounded">Day {holdDays + 1}</span>
+                        <span className="text-[11.5px] font-black text-slate-400">{trade.instrument}</span>
+                        <span className="text-[11.5px] font-black text-slate-500 font-mono">{trade.strike}</span>
+                        <span className="text-[9.5px] text-slate-650 font-mono">{expiry}</span>
+                        <span className="text-[9px] text-slate-600 bg-slate-900/50 px-1 py-0.2 rounded font-mono">D{holdDays + 1}</span>
                       </div>
-                      <div className="text-right mt-1">
-                        <div className="text-base font-black" style={{ color: pnlColor }}>{fmtPnl(trade.pnl || 0)}</div>
-                        <div className="text-[10px]" style={{ color: pnlColor }}>{pnlPct}%</div>
+                      <div className="text-right">
+                        <div className="text-[13.5px] font-black font-mono leading-none" style={{ color: pnlColor }}>{fmtPnl(trade.pnl || 0)}</div>
+                        <div className="text-[9.5px] font-mono leading-none mt-0.5" style={{ color: pnlColor }}>{pnlPct}%</div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-4 gap-2 mb-2">
+                    <div className="grid grid-cols-4 gap-1.5 mb-1.5">
                       {[
                         { label: "Entry", value: `₹${fmt(trade.entry_price, 1)}`, color: "#64748b" },
                         { label: "CMP", value: `₹${fmt(currentPrice, 1)}`, color: pnlColor },
-                        { label: `SL`, value: `₹${fmt(trade.stop_loss, 1)}`, color: "#ef4444" },
+                        { label: `SL`, value: `₹${fmt(trade.stop_loss, 1)}`, color: "#f43f5e" },
                         { label: "Target", value: `₹${fmt(trade.target, 1)}`, color: "#10b981" },
                       ].map(c => (
-                        <div key={c.label} className="bg-slate-900/40 rounded-lg p-1.5 text-center border border-slate-800">
-                          <div className="text-[9px] text-slate-600">{c.label}</div>
-                          <div className="text-xs font-black" style={{ color: c.color }}>{c.value}</div>
+                        <div key={c.label} className="bg-slate-900/40 rounded p-1 text-center border border-slate-850">
+                          <div className="text-[8px] text-slate-600 uppercase tracking-wide leading-none mb-0.5">{c.label}</div>
+                          <div className="text-[11px] font-black font-mono" style={{ color: c.color }}>{c.value}</div>
                         </div>
                       ))}
                     </div>
-                    <div className="flex items-center justify-between text-[10px] text-slate-600 mt-2">
-                      <span>Reason: {parsedN.reasoning || "Data Collection"}</span>
-                      <span>Pattern: {parsedN.strategyName || "Sandbox Pattern"}</span>
+                    <div className="flex items-center justify-between text-[8.5px] text-slate-600 font-mono">
+                      <span className="truncate max-w-[50%]">Reason: {parsedN.reasoning || "Data Collection"}</span>
+                      <span className="truncate max-w-[45%]">Pattern: {parsedN.strategyName || "Sandbox Pattern"}</span>
                     </div>
                   </div>
                 );
@@ -527,85 +542,79 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
         )}
       </div>
 
-      {/* ── Row 1: Daily Bias + VIX Panel ──────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-4">
-
+      {/* ── Row 1: Daily Bias + VIX Panel (Optimized Height) ────────────────── */}
+      <div className="flex flex-col gap-1.5">
+        
         {/* Swing Condition Monitor (HTF + Momentum + FII/DII) */}
         <div
-          className="rounded-xl border p-4 transition-all col-span-2 relative overflow-hidden"
+          className="rounded-lg border p-2.5 transition-all relative overflow-hidden"
           style={{
-            background: bias?.bg ?? "rgba(15,23,42,0.8)",
-            borderColor: bias?.color ? `${bias.color}40` : "#1e293b",
-            boxShadow: bias?.glow ?? "none",
+            background: bias?.bg ?? "rgba(10,14,26,0.9)",
+            borderColor: bias?.color ? `${bias.color}35` : "#101626",
+            boxShadow: darkMode && bias?.glow ? bias.glow : undefined,
           }}
         >
-          {/* Subtle glassmorphism gradient bg */}
-          <div className="absolute inset-0 opacity-10 bg-gradient-to-br from-white/10 to-transparent pointer-events-none" />
+          {/* Glowing backlighting */}
+          <div className="absolute inset-0 opacity-[0.03] bg-gradient-to-br from-white to-transparent pointer-events-none" />
 
-          <div className="flex items-center justify-between mb-4 relative z-10">
-            <div className="flex items-center gap-2">
-              <BarChart2 size={16} style={{ color: bias?.color ?? "#64748b" }} />
-              <span className="text-sm font-black text-slate-300 uppercase tracking-widest">Swing Condition Monitor · HTF</span>
+          <div className="flex items-center justify-between mb-2 relative z-10">
+            <div className="flex items-center gap-1.5">
+              <BarChart2 size={13} style={{ color: bias?.color ?? "#64748b" }} className="animate-pulse" />
+              <span className="text-[11px] font-black text-slate-350 uppercase tracking-widest">SWING CONDITION MONITOR - HTF</span>
             </div>
             {dailyBias && (
-              <span className="text-[10px] text-slate-500 font-mono">Last Updated: {dailyBias.lastUpdatedDate}</span>
+              <span className="text-[8px] text-slate-500 font-mono uppercase tracking-wide">SYNC: {dailyBias.lastUpdatedDate}</span>
             )}
           </div>
 
           {dailyBias ? (
-            <div className="relative z-10 grid grid-cols-4 gap-6">
+            <div className="relative z-10 grid grid-cols-4 gap-3.5">
               
               {/* Column 1: Core Trend & Score */}
-              <div className="col-span-1 border-r border-slate-800/60 pr-6">
-                <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Daily Bias</div>
-                <div className="flex items-center gap-3 mb-4">
-                  <span className="text-2xl font-black" style={{ color: bias?.color }}>
-                    {bias?.label}
+              <div className="col-span-1 border-r border-slate-900/80 pr-3.5">
+                <div className="text-[8px] text-slate-500 uppercase tracking-wider font-bold mb-0.5">Daily Bias</div>
+                <div className="mb-2.5">
+                  <span className="text-[15.5px] font-black tracking-tight" style={{ color: bias?.color }}>
+                    {bias?.label.split(" ").slice(1).join(" ") || bias?.label}
                   </span>
                 </div>
-                <div className="mb-4">
-                  <div className="flex justify-between text-[10px] text-slate-500 mb-1">
-                    <span>Position Score</span>
-                    <span className="font-black" style={{ color: bias?.color }}>{dailyBias.positionScore}/100</span>
+                <div className="mb-2">
+                  <div className="flex justify-between text-[8px] text-slate-500 mb-0.5 font-mono">
+                    <span>Score</span>
+                    <span className="font-black" style={{ color: bias?.color }}>{dailyBias.positionScore}%</span>
                   </div>
-                  <div className="w-full h-1.5 bg-slate-800/80 rounded-full overflow-hidden">
+                  <div className="w-full h-1 bg-slate-950 rounded-full overflow-hidden border border-white/5 bg-slate-900/50">
                     <div
                       className="h-full rounded-full transition-all duration-1000 ease-out"
                       style={{ width: `${dailyBias.positionScore}%`, background: bias?.color }}
                     />
                   </div>
                 </div>
-                <div className="flex flex-col gap-1.5 mt-2">
-                  <span className={`text-[9px] px-2 py-1 rounded font-black text-center ${dailyBias.weeklyTrend === "UPTREND" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : dailyBias.weeklyTrend === "DOWNTREND" ? "bg-red-500/10 text-red-400 border border-red-500/20" : "bg-slate-800/60 text-slate-400"}`}>
-                    WEEKLY: {dailyBias.weeklyTrend}
+                <div className="flex flex-col gap-1 mt-1 font-mono">
+                  <span className={`text-[8.5px] py-0.5 rounded font-black text-center border uppercase tracking-wider leading-none ${dailyBias.weeklyTrend === "UPTREND" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/15" : dailyBias.weeklyTrend === "DOWNTREND" ? "bg-rose-500/10 text-rose-400 border-rose-500/15" : "bg-slate-900 text-slate-550 border-slate-800"}`}>
+                    WK: {dailyBias.weeklyTrend.replace("TREND", "")}
                   </span>
-                  <div className="flex gap-2">
-                    {dailyBias.higherHighs && <span className="text-[9px] flex-1 text-center py-1 rounded bg-emerald-500/10 text-emerald-400 font-black border border-emerald-500/20">HH ✅</span>}
-                    {dailyBias.lowerLows && <span className="text-[9px] flex-1 text-center py-1 rounded bg-red-500/10 text-red-400 font-black border border-red-500/20">LL ✅</span>}
+                  <div className="flex gap-1">
+                    {dailyBias.higherHighs && <span className="text-[8.5px] py-0.5 rounded flex-1 text-center bg-emerald-500/15 text-emerald-450 border border-emerald-500/20 font-black leading-none">HH ✅</span>}
+                    {dailyBias.lowerLows && <span className="text-[8.5px] py-0.5 rounded flex-1 text-center bg-rose-500/15 text-rose-450 border border-rose-500/20 font-black leading-none">LL ⚠️</span>}
                   </div>
                 </div>
               </div>
 
-              {/* Column 2: EMAs & Moving Averages */}
-              <div className="col-span-1 border-r border-slate-800/60 pr-6">
-                <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-3">Key EMAs (Daily)</div>
-                <div className="flex flex-col gap-2">
+              {/* Column 2: Key EMAs */}
+              <div className="col-span-1 border-r border-slate-900/80 pr-3.5">
+                <div className="text-[8px] text-slate-500 uppercase tracking-wider font-bold mb-2">Daily EMAs</div>
+                <div className="flex flex-col gap-1.5">
                   {[
-                    { label: "EMA 20", val: dailyBias.ema20, above: dailyBias.aboveEma20, desc: "Short-term" },
-                    { label: "EMA 50", val: dailyBias.ema50, above: dailyBias.aboveEma50, desc: "Medium-term" },
-                    { label: "EMA 200", val: dailyBias.ema200, above: dailyBias.aboveEma200, desc: "Long-term" },
+                    { label: "EMA 20", val: dailyBias.ema20, above: dailyBias.aboveEma20 },
+                    { label: "EMA 50", val: dailyBias.ema50, above: dailyBias.aboveEma50 },
+                    { label: "EMA 200", val: dailyBias.ema200, above: dailyBias.aboveEma200 },
                   ].map(e => (
-                    <div key={e.label} className="flex items-center justify-between bg-slate-900/40 rounded p-1.5 border border-slate-800/50">
-                      <div className="flex flex-col">
-                        <span className="text-[10px] font-black text-slate-300">{e.label}</span>
-                        <span className="text-[8px] text-slate-500">{e.desc}</span>
-                      </div>
+                    <div key={e.label} className="flex items-center justify-between bg-slate-950/40 rounded p-1 border border-slate-900/60 leading-none">
+                      <span className="text-[8.5px] font-black text-slate-400">{e.label}</span>
                       <div className="flex flex-col items-end">
-                        <span className="text-[11px] font-black" style={{ color: e.above ? "#10b981" : "#ef4444" }}>
+                        <span className="text-[11.5px] font-black font-mono" style={{ color: e.above ? "#10b981" : "#f43f5e" }}>
                           {e.val > 0 ? fmt(e.val, 0) : "—"}
-                        </span>
-                        <span style={{ color: e.above ? "#10b981" : "#ef4444" }} className="text-[8px] uppercase font-black">
-                          {e.above ? "Above" : "Below"}
                         </span>
                       </div>
                     </div>
@@ -614,149 +623,137 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
               </div>
 
               {/* Column 3: Momentum Indicators */}
-              <div className="col-span-1 border-r border-slate-800/60 pr-6">
-                <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-3">Momentum (1D)</div>
-                <div className="space-y-4">
+              <div className="col-span-1 border-r border-slate-900/80 pr-3.5">
+                <div className="text-[8px] text-slate-500 uppercase tracking-wider font-bold mb-2">Momentum</div>
+                <div className="space-y-2">
                   {/* RSI */}
                   <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-[10px] font-black text-slate-400">RSI (14)</span>
-                      <span className={`text-[11px] font-black ${dailyBias.rsi > 70 ? "text-red-400" : dailyBias.rsi < 30 ? "text-emerald-400" : "text-sky-400"}`}>
+                    <div className="flex justify-between items-center mb-0.5 font-mono">
+                      <span className="text-[8.5px] text-slate-400 font-bold">RSI (14)</span>
+                      <span className={`text-[11.5px] font-black ${dailyBias.rsi > 70 ? "text-rose-400" : dailyBias.rsi < 35 ? "text-emerald-400" : "text-cyan-400"}`}>
                         {dailyBias.rsi || "—"}
                       </span>
                     </div>
-                    <div className="w-full h-1 bg-slate-800 rounded-full relative">
-                      <div className="absolute top-0 bottom-0 left-[30%] w-[1px] bg-emerald-500/50 z-10" />
-                      <div className="absolute top-0 bottom-0 left-[70%] w-[1px] bg-red-500/50 z-10" />
+                    <div className="w-full h-1 bg-slate-950 rounded-full relative border border-white/5">
+                      <div className="absolute top-0 bottom-0 left-[35%] w-[1px] bg-emerald-500/50 z-10" />
+                      <div className="absolute top-0 bottom-0 left-[70%] w-[1px] bg-rose-500/50 z-10" />
                       <div 
-                        className="h-full bg-sky-400 rounded-full transition-all" 
+                        className="h-full bg-cyan-500 rounded-full transition-all" 
                         style={{ width: `${Math.min(100, Math.max(0, dailyBias.rsi))}%` }} 
                       />
                     </div>
                   </div>
                   {/* MACD */}
-                  <div className="bg-slate-900/40 p-2 rounded border border-slate-800/50">
-                    <span className="text-[10px] font-black text-slate-400 block mb-1">MACD (12,26,9)</span>
+                  <div className="bg-slate-950/40 p-1 px-1.5 rounded border border-slate-900/60 leading-none">
+                    <span className="text-[8px] font-bold text-slate-500 block mb-0.5">MACD (1D)</span>
                     {dailyBias.macd ? (
-                      <div className="flex justify-between items-end">
-                        <div className="flex flex-col">
-                          <span className="text-[9px] text-slate-500">Hist</span>
-                          <span className={`text-[11px] font-black ${dailyBias.macd.histogram > 0 ? "text-emerald-400" : "text-red-400"}`}>
-                            {dailyBias.macd.histogram > 0 ? "+" : ""}{dailyBias.macd.histogram}
-                          </span>
-                        </div>
-                        <div className="flex flex-col items-end">
-                          <span className="text-[9px] text-slate-500">Signal</span>
-                          <span className="text-[11px] font-black text-sky-400">{dailyBias.macd.signal}</span>
-                        </div>
+                      <div className="flex justify-between items-center mt-1">
+                        <span className={`text-[10px] font-black font-mono ${dailyBias.macd.histogram > 0 ? "text-emerald-400" : "text-rose-450"}`}>
+                          H: {dailyBias.macd.histogram > 0 ? "+" : ""}{dailyBias.macd.histogram.toFixed(1)}
+                        </span>
+                        <span className="text-[9.5px] font-black font-mono text-cyan-400">{dailyBias.macd.signal.toFixed(1)}</span>
                       </div>
                     ) : (
-                      <span className="text-[10px] text-slate-500">Calculating...</span>
+                      <span className="text-[8.5px] text-slate-600 font-mono">N/A</span>
                     )}
                   </div>
                 </div>
               </div>
 
-              {/* Column 4: Institutional Flow & Breakout */}
+              {/* Column 4: FII/DII Flows & Radar */}
               <div className="col-span-1">
-                <div className="text-[10px] text-slate-500 uppercase tracking-widest mb-3">Institutional Flow & Radar</div>
+                <div className="text-[8px] text-slate-500 uppercase tracking-wider font-bold mb-2">Inst Flows & Radar</div>
                 
                 {/* Flow Indicator */}
-                <div className="mb-4 bg-slate-900/40 p-2 rounded border border-slate-800/50">
-                  <div className="text-[9px] text-slate-400 mb-1">FII/DII NET BIAS</div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden flex">
+                <div className="mb-2 bg-slate-950/40 p-1 px-1.5 rounded border border-slate-900/60 leading-none">
+                  <div className="text-[8px] text-slate-500 mb-1 font-bold">FII/DII BIAS</div>
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex-1 h-1 bg-slate-950 rounded-full overflow-hidden flex">
                       <div className={`h-full ${dailyBias.fiiDiiFlow === "BULLISH" ? "w-full bg-emerald-500" : "w-0"}`} />
-                      <div className={`h-full ${dailyBias.fiiDiiFlow === "BEARISH" ? "w-full bg-red-500" : "w-0"}`} />
+                      <div className={`h-full ${dailyBias.fiiDiiFlow === "BEARISH" ? "w-full bg-rose-500" : "w-0"}`} />
                       <div className={`h-full ${dailyBias.fiiDiiFlow === "NEUTRAL" ? "w-full bg-slate-500" : "w-0"}`} />
                     </div>
-                    <span className={`text-[10px] font-black ${dailyBias.fiiDiiFlow === "BULLISH" ? "text-emerald-400" : dailyBias.fiiDiiFlow === "BEARISH" ? "text-red-400" : "text-slate-400"}`}>
-                      {dailyBias.fiiDiiFlow}
+                    <span className={`text-[9.5px] font-black font-mono ${dailyBias.fiiDiiFlow === "BULLISH" ? "text-emerald-400" : dailyBias.fiiDiiFlow === "BEARISH" ? "text-rose-400" : "text-slate-450"}`}>
+                      {dailyBias.fiiDiiFlow.slice(0, 4)}
                     </span>
                   </div>
                 </div>
 
                 {/* Breakout Radar */}
-                <div className="bg-slate-900/40 p-2 rounded border border-slate-800/50 relative overflow-hidden">
-                  <div className="absolute right-[-10px] top-[-10px] opacity-10">
-                    <Activity size={40} />
-                  </div>
-                  <span className="text-[9px] text-slate-400 mb-2 block">SWING BREAKOUT RADAR</span>
-                  <div className="flex justify-between text-[10px]">
+                <div className="bg-slate-950/40 p-1 px-1.5 rounded border border-slate-900/60 leading-none">
+                  <span className="text-[8px] text-slate-500 mb-1 block font-bold">BREAKOUT LEVELS</span>
+                  <div className="flex justify-between text-[10px] font-mono mt-0.5">
                     <div className="flex flex-col">
-                      <span className="text-slate-500">PWH</span>
-                      <span className="font-mono text-emerald-400">{dailyBias.pwh ? fmt(dailyBias.pwh, 0) : "—"}</span>
+                      <span className="text-[7.5px] text-slate-650">PWH</span>
+                      <span className="font-extrabold text-emerald-400">{dailyBias.pwh ? fmt(dailyBias.pwh, 0) : "—"}</span>
                     </div>
                     <div className="flex flex-col items-end">
-                      <span className="text-slate-500">PWL</span>
-                      <span className="font-mono text-red-400">{dailyBias.pwl ? fmt(dailyBias.pwl, 0) : "—"}</span>
+                      <span className="text-[7.5px] text-slate-650">PWL</span>
+                      <span className="font-extrabold text-rose-450">{dailyBias.pwl ? fmt(dailyBias.pwl, 0) : "—"}</span>
                     </div>
                   </div>
                 </div>
-
               </div>
             </div>
           ) : (
-            <div className="flex items-center justify-center gap-2 text-slate-500 text-sm py-8 h-32 relative z-10">
-              <Activity size={16} className="animate-pulse" />
+            <div className="flex items-center justify-center gap-2 text-slate-500 text-sm py-4 h-24 relative z-10 font-mono">
+              <Activity size={13} className="animate-pulse" />
               Computing HTF parameters...
             </div>
           )}
         </div>
 
         {/* VIX Intelligence Panel (Condensed) */}
-        <div className="rounded-lg border border-slate-800/60 bg-slate-900/40 p-2 flex items-center justify-between text-[9px] font-mono">
-          <div className="flex items-center gap-2">
-            <Zap size={10} className="text-amber-400" />
-            <span className="text-slate-400 uppercase font-black">VIX Intelligence:</span>
+        <div className="rounded-lg border border-slate-900 bg-slate-950/40 p-1.5 px-2.5 flex items-center justify-between text-[10px] font-mono shadow-sm">
+          <div className="flex items-center gap-1.5">
+            <Zap size={11} className="text-amber-400 animate-pulse" />
+            <span className="text-slate-500 uppercase font-black tracking-wide">VIX Intelligence:</span>
           </div>
           {evaluation ? (
-            <div className="flex gap-4 items-center">
+            <div className="flex gap-3 items-center">
               <span className="font-black" style={{ color: VIX_CONFIG[evaluation.vixCategory].color }}>
                 {vix > 0 ? fmt(vix, 1) : "—"} ({VIX_CONFIG[evaluation.vixCategory].label})
               </span>
-              <span className="text-slate-500">|</span>
-              <span className={`font-black ${evaluation.canTrade ? "text-emerald-400" : "text-red-400"}`}>
+              <span className="text-slate-800">|</span>
+              <span className={`font-black ${evaluation.canTrade ? "text-emerald-400" : "text-rose-450"}`}>
                 BUY: {evaluation.canTrade ? "GO" : "AVOID"}
               </span>
-              <span className="text-slate-500">|</span>
+              <span className="text-slate-800">|</span>
               <span className={`font-black ${
                 evaluation.setupQuality === "EXCELLENT" ? "text-emerald-400" :
-                evaluation.setupQuality === "GOOD" ? "text-blue-400" :
-                evaluation.setupQuality === "MARGINAL" ? "text-amber-400" : "text-red-400"
+                evaluation.setupQuality === "GOOD" ? "text-cyan-400" :
+                evaluation.setupQuality === "MARGINAL" ? "text-amber-400" : "text-rose-450"
               }`}>
                 QUAL: {evaluation.setupQuality}
               </span>
-              <span className="text-slate-500">|</span>
+              <span className="text-slate-800">|</span>
               <span className="text-white font-black">LOTS: {evaluation.suggestedLots}</span>
             </div>
           ) : (
-            <span className="text-slate-500 animate-pulse">Loading...</span>
+            <span className="text-slate-600 animate-pulse">Loading...</span>
           )}
         </div>
       </div>
 
       {/* ── Row 2: Swing S&R Levels (Layer 13) ─────────────────────────────── */}
       {swingLevels && (
-        <div className="rounded-xl border border-slate-800/60 bg-slate-900/40 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Target size={14} className="text-violet-400" />
-              <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Key S&R Levels · Layer 13</span>
+        <div className="rounded-lg border border-slate-900 bg-slate-950/20 p-2.5">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5">
+              <Target size={13} className="text-violet-400" />
+              <span className="text-[11px] font-black text-slate-350 uppercase tracking-widest">Key S&R Levels · Layer 13</span>
             </div>
             {swingLevels.proximityWarning && (
-              <div className="flex items-center gap-1.5 bg-amber-500/15 border border-amber-500/30 rounded-lg px-2 py-1">
-                <AlertTriangle size={11} className="text-amber-400" />
-                <span className="text-[10px] text-amber-400 font-black">PROXIMITY WARNING</span>
+              <div className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/25 rounded px-1.5 py-0.2">
+                <AlertTriangle size={10} className="text-amber-400 animate-bounce" />
+                <span className="text-[8px] text-amber-450 font-black">PROXIMITY WARNING</span>
               </div>
             )}
           </div>
 
-          {/* Visual Level Bar */}
-          <div className="relative">
-            {/* Horizontal price map */}
-            <div className="flex flex-col gap-1">
-              {/* Top levels (resistance) */}
+          <div className="relative font-mono">
+            <div className="flex flex-col gap-0.5">
+              {/* Resistance Levels */}
               {[
                 { label: "R2", price: swingLevels.weeklyR2, type: "RESISTANCE" as const, src: "Weekly R2" },
                 { label: "R1", price: swingLevels.weeklyR1, type: "RESISTANCE" as const, src: "Weekly R1" },
@@ -765,42 +762,41 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
               ]
                 .filter(l => l.price > swingLevels.spot)
                 .sort((a, b) => a.price - b.price)
-                .slice(0, 3)
+                .slice(0, 2)
                 .map(l => (
-                  <div key={l.label} className="flex items-center gap-2 group">
-                    <div className="w-10 text-right text-[10px] text-red-400 font-black shrink-0">{l.label}</div>
-                    <div className="flex-1 relative h-6 flex items-center">
+                  <div key={l.label} className="flex items-center gap-2 py-0.2">
+                    <div className="w-8 text-right text-[9.5px] text-rose-450 font-black shrink-0">{l.label}</div>
+                    <div className="flex-1 relative h-4 flex items-center">
                       <div className="absolute inset-0 flex items-center">
-                        <div className="w-full h-px bg-red-500/30" />
+                        <div className="w-full h-[0.5px] bg-rose-500/20" />
                       </div>
-                      <div className="relative z-10 ml-auto flex items-center gap-1.5 bg-slate-900 pl-1 pr-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                        <span className="text-xs font-black text-red-400">{fmt(l.price, 0)}</span>
-                        <span className="text-[9px] text-slate-600">{l.src}</span>
+                      <div className="relative z-10 ml-auto flex items-center gap-1 bg-slate-950 px-1 border border-rose-950/20 rounded">
+                        <span className="text-[11px] font-black text-rose-450">{fmt(l.price, 0)}</span>
+                        <span className="text-[8px] text-slate-600 font-bold uppercase">{l.src.slice(0, 8)}</span>
                       </div>
                     </div>
-                    <div className="w-14 text-right text-[10px] text-slate-600 shrink-0">
+                    <div className="w-16 text-right text-[9.5px] text-slate-500 shrink-0">
                       +{fmt(l.price - swingLevels.spot, 0)} pts
                     </div>
                   </div>
                 ))}
 
-              {/* SPOT line */}
-              <div className="flex items-center gap-2 my-1">
-                <div className="w-10 text-right text-[10px] text-blue-400 font-black shrink-0">SPOT</div>
-                <div className="flex-1 relative h-7 flex items-center">
+              {/* SPOT Price Line */}
+              <div className="flex items-center gap-2 my-0.5">
+                <div className="w-8 text-right text-[10px] text-cyan-400 font-black shrink-0">SPOT</div>
+                <div className="flex-1 relative h-5 flex items-center">
                   <div className="absolute inset-0 flex items-center">
-                    <div className="w-full h-0.5 bg-blue-500/60" style={{ boxShadow: "0 0 8px rgba(59,130,246,0.5)" }} />
+                    <div className="w-full h-0.5 bg-cyan-500/40" style={{ boxShadow: "0 0 6px rgba(34,211,238,0.3)" }} />
                   </div>
-                  <div className="relative z-10 ml-auto flex items-center gap-1.5 bg-slate-900 pl-1 pr-2">
-                    <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
-                    <span className="text-sm font-black text-blue-300">{fmt(swingLevels.spot, 0)}</span>
+                  <div className="relative z-10 ml-auto flex items-center gap-1 bg-slate-950 px-1.5 border border-cyan-500/30 rounded">
+                    <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                    <span className="text-[12.5px] font-black text-cyan-300">{fmt(swingLevels.spot, 0)}</span>
                   </div>
                 </div>
-                <div className="w-14" />
+                <div className="w-16" />
               </div>
 
-              {/* Support levels */}
+              {/* Support Levels */}
               {[
                 { label: "Pvt", price: swingLevels.weeklyPivot, type: "SUPPORT" as const, src: "Weekly Pivot" },
                 { label: "S1",  price: swingLevels.weeklyS1, type: "SUPPORT" as const, src: "Weekly S1" },
@@ -809,33 +805,31 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
               ]
                 .filter(l => l.price < swingLevels.spot && l.price > 0)
                 .sort((a, b) => b.price - a.price)
-                .slice(0, 3)
+                .slice(0, 2)
                 .map(l => (
-                  <div key={l.label} className="flex items-center gap-2">
-                    <div className="w-10 text-right text-[10px] text-emerald-400 font-black shrink-0">{l.label}</div>
-                    <div className="flex-1 relative h-6 flex items-center">
+                  <div key={l.label} className="flex items-center gap-2 py-0.2">
+                    <div className="w-8 text-right text-[9.5px] text-emerald-400 font-black shrink-0">{l.label}</div>
+                    <div className="flex-1 relative h-4 flex items-center">
                       <div className="absolute inset-0 flex items-center">
-                        <div className="w-full h-px bg-emerald-500/30" />
+                        <div className="w-full h-[0.5px] bg-emerald-500/20" />
                       </div>
-                      <div className="relative z-10 ml-auto flex items-center gap-1.5 bg-slate-900 pl-1 pr-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        <span className="text-xs font-black text-emerald-400">{fmt(l.price, 0)}</span>
-                        <span className="text-[9px] text-slate-600">{l.src}</span>
+                      <div className="relative z-10 ml-auto flex items-center gap-1 bg-slate-950 px-1 border border-emerald-950/20 rounded">
+                        <span className="text-[11px] font-black text-emerald-450">{fmt(l.price, 0)}</span>
+                        <span className="text-[8px] text-slate-600 font-bold uppercase">{l.src.slice(0, 8)}</span>
                       </div>
                     </div>
-                    <div className="w-14 text-right text-[10px] text-slate-600 shrink-0">
+                    <div className="w-16 text-right text-[9.5px] text-slate-500 shrink-0">
                       -{fmt(swingLevels.spot - l.price, 0)} pts
                     </div>
                   </div>
                 ))}
             </div>
 
-            {/* Proximity detail */}
             {swingLevels.proximityDetail && (
-              <div className={`mt-3 text-xs px-3 py-2 rounded-lg font-mono ${
+              <div className={`mt-1.5 text-[9.5px] px-2 py-1 rounded font-mono ${
                 swingLevels.proximityWarning
-                  ? "bg-amber-500/10 border border-amber-500/30 text-amber-300"
-                  : "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400"
+                  ? "bg-amber-500/10 border border-amber-500/25 text-amber-300"
+                  : "bg-emerald-500/10 border border-emerald-500/15 text-emerald-400"
               }`}>
                 {swingLevels.proximityDetail}
               </div>
@@ -845,166 +839,129 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
       )}
 
       {/* ── Row 3: Active Strategies · Ready to Fire ────────────────────── */}
-      <div className="rounded-xl border border-slate-800/60 bg-slate-900/20 p-4 mt-4">
-        <div className="flex items-center gap-2 mb-4">
-          <Target size={16} className="text-fuchsia-400" />
-          <span className="text-sm font-black text-slate-300 uppercase tracking-widest">Active Strategies · Ready to Fire</span>
+      <div className="rounded-lg border border-slate-900 bg-slate-950/20 p-2.5">
+        <div className="flex items-center gap-1.5 mb-2">
+          <Target size={13} className="text-fuchsia-400" />
+          <span className="text-[11px] font-black text-slate-355 uppercase tracking-widest">Active Strategies · Ready to Fire</span>
         </div>
 
         {dailyBias ? (
-          <div className="grid grid-cols-4 gap-4">
-            {/* 1. Trend Continuation */}
-            <div className={`p-3 rounded-lg border ${
-              dailyBias.weeklyTrend === "UPTREND" && dailyBias.emaAlignment === "BULLISH" ? "bg-emerald-500/10 border-emerald-500/30" :
-              dailyBias.weeklyTrend === "DOWNTREND" && dailyBias.emaAlignment === "BEARISH" ? "bg-red-500/10 border-red-500/30" : "bg-slate-900/60 border-slate-800/50 opacity-60"
-            }`}>
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-[10px] font-black text-slate-400">TREND CONTINUATION</span>
-                { (dailyBias.weeklyTrend === "UPTREND" && dailyBias.emaAlignment === "BULLISH") || (dailyBias.weeklyTrend === "DOWNTREND" && dailyBias.emaAlignment === "BEARISH") ? (
-                  <span className="animate-pulse w-2 h-2 rounded-full bg-emerald-400" />
-                ) : (
-                  <span className="w-2 h-2 rounded-full bg-slate-700" />
-                )}
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              {
+                title: "TREND CONTINUATION",
+                desc: "Aligns HTF trend with EMA structures.",
+                ready: (dailyBias.weeklyTrend === "UPTREND" && dailyBias.emaAlignment === "BULLISH") || (dailyBias.weeklyTrend === "DOWNTREND" && dailyBias.emaAlignment === "BEARISH"),
+                statusStr: dailyBias.weeklyTrend === "UPTREND" && dailyBias.emaAlignment === "BULLISH" ? "READY (LONG)" : dailyBias.weeklyTrend === "DOWNTREND" && dailyBias.emaAlignment === "BEARISH" ? "READY (SHORT)" : "WAITING",
+                readyColor: dailyBias.weeklyTrend === "UPTREND" && dailyBias.emaAlignment === "BULLISH" ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" : "text-rose-450 bg-rose-500/10 border-rose-500/20"
+              },
+              {
+                title: "MEAN REVERSION",
+                desc: "Fades extreme daily RSI exhaustion zones.",
+                ready: dailyBias.rsi < 35 || dailyBias.rsi > 70,
+                statusStr: dailyBias.rsi < 35 ? "READY (OVERSOLD LONG)" : dailyBias.rsi > 70 ? "READY (OVERBOUGHT SHORT)" : "WAITING",
+                readyColor: dailyBias.rsi < 35 ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" : "text-rose-450 bg-rose-500/10 border-rose-500/20"
+              },
+              {
+                title: "BREAKOUT EXPANSION",
+                desc: "Trades structural breaches of PWH/PWL.",
+                ready: dailyBias.currentPrice > dailyBias.pwh || (dailyBias.currentPrice < dailyBias.pwl && dailyBias.pwl > 0),
+                statusStr: dailyBias.currentPrice > dailyBias.pwh ? "READY (PWH BREAK)" : (dailyBias.currentPrice < dailyBias.pwl && dailyBias.pwl > 0) ? "READY (PWL BREAK)" : "WAITING",
+                readyColor: dailyBias.currentPrice > dailyBias.pwh ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" : "text-rose-450 bg-rose-500/10 border-rose-500/20"
+              },
+              {
+                title: "INSTITUTIONAL CLONER",
+                desc: "Follows FII/DII aggressive daily flows.",
+                ready: (dailyBias.fiiDiiFlow === "BULLISH" && dailyBias.bias === "STRONG_BULL") || (dailyBias.fiiDiiFlow === "BEARISH" && dailyBias.bias === "STRONG_BEAR"),
+                statusStr: dailyBias.fiiDiiFlow === "BULLISH" && dailyBias.bias === "STRONG_BULL" ? "READY (SMART BUY)" : dailyBias.fiiDiiFlow === "BEARISH" && dailyBias.bias === "STRONG_BEAR" ? "READY (SMART SELL)" : "WAITING",
+                readyColor: dailyBias.fiiDiiFlow === "BULLISH" && dailyBias.bias === "STRONG_BULL" ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" : "text-rose-450 bg-rose-500/10 border-rose-500/20"
+              }
+            ].map(s => (
+              <div key={s.title} className={`p-2 rounded border transition-colors ${
+                s.ready ? "bg-slate-900/80 border-indigo-950" : "bg-slate-950/40 border-slate-900/50 opacity-60"
+              }`}>
+                <div className="flex justify-between items-start mb-1 gap-1">
+                  <span className="text-[9px] font-black text-slate-450 tracking-wider truncate">{s.title}</span>
+                  <span className={`w-1.5 h-1.5 rounded-full ${s.ready ? "bg-emerald-400 animate-pulse" : "bg-slate-700"}`} />
+                </div>
+                <p className="text-[8.5px] text-slate-500 leading-tight mb-1">{s.desc}</p>
+                <div className="font-mono text-[9px] font-black uppercase">
+                  {s.ready ? (
+                    <span className={`px-1.5 py-0.2 rounded border ${s.readyColor}`}>{s.statusStr}</span>
+                  ) : (
+                    <span className="text-slate-600 bg-slate-900/80 px-1.5 py-0.2 rounded border border-slate-800">WAITING</span>
+                  )}
+                </div>
               </div>
-              <div className="text-[10px] text-slate-500 leading-tight">
-                Aligns HTF trend with EMA structure. <br/>
-                <span className="font-black mt-1 block">
-                  Status: {dailyBias.weeklyTrend === "UPTREND" && dailyBias.emaAlignment === "BULLISH" ? <span className="text-emerald-400">READY (LONG)</span> : dailyBias.weeklyTrend === "DOWNTREND" && dailyBias.emaAlignment === "BEARISH" ? <span className="text-red-400">READY (SHORT)</span> : "WAITING"}
-                </span>
-              </div>
-            </div>
-
-            {/* 2. Mean Reversion */}
-            <div className={`p-3 rounded-lg border ${
-              dailyBias.rsi < 35 ? "bg-emerald-500/10 border-emerald-500/30" :
-              dailyBias.rsi > 70 ? "bg-red-500/10 border-red-500/30" : "bg-slate-900/60 border-slate-800/50 opacity-60"
-            }`}>
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-[10px] font-black text-slate-400">MEAN REVERSION</span>
-                { dailyBias.rsi < 35 || dailyBias.rsi > 70 ? (
-                  <span className="animate-pulse w-2 h-2 rounded-full bg-emerald-400" />
-                ) : (
-                  <span className="w-2 h-2 rounded-full bg-slate-700" />
-                )}
-              </div>
-              <div className="text-[10px] text-slate-500 leading-tight">
-                Fades extreme RSI exhaustion zones. <br/>
-                <span className="font-black mt-1 block">
-                  Status: {dailyBias.rsi < 35 ? <span className="text-emerald-400">READY (OVERSOLD LONG)</span> : dailyBias.rsi > 70 ? <span className="text-red-400">READY (OVERBOUGHT SHORT)</span> : "WAITING"}
-                </span>
-              </div>
-            </div>
-
-            {/* 3. Breakout Expansion */}
-            <div className={`p-3 rounded-lg border ${
-              dailyBias.currentPrice > dailyBias.pwh ? "bg-emerald-500/10 border-emerald-500/30" :
-              dailyBias.currentPrice < dailyBias.pwl && dailyBias.pwl > 0 ? "bg-red-500/10 border-red-500/30" : "bg-slate-900/60 border-slate-800/50 opacity-60"
-            }`}>
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-[10px] font-black text-slate-400">BREAKOUT EXPANSION</span>
-                { dailyBias.currentPrice > dailyBias.pwh || (dailyBias.currentPrice < dailyBias.pwl && dailyBias.pwl > 0) ? (
-                  <span className="animate-pulse w-2 h-2 rounded-full bg-emerald-400" />
-                ) : (
-                  <span className="w-2 h-2 rounded-full bg-slate-700" />
-                )}
-              </div>
-              <div className="text-[10px] text-slate-500 leading-tight">
-                Trades structural breaches (PWH/PWL). <br/>
-                <span className="font-black mt-1 block">
-                  Status: {dailyBias.currentPrice > dailyBias.pwh ? <span className="text-emerald-400">READY (PWH BREAK)</span> : (dailyBias.currentPrice < dailyBias.pwl && dailyBias.pwl > 0) ? <span className="text-red-400">READY (PWL BREAK)</span> : "WAITING"}
-                </span>
-              </div>
-            </div>
-
-            {/* 4. Institutional Cloner */}
-            <div className={`p-3 rounded-lg border ${
-              dailyBias.fiiDiiFlow === "BULLISH" && dailyBias.bias === "STRONG_BULL" ? "bg-emerald-500/10 border-emerald-500/30" :
-              dailyBias.fiiDiiFlow === "BEARISH" && dailyBias.bias === "STRONG_BEAR" ? "bg-red-500/10 border-red-500/30" : "bg-slate-900/60 border-slate-800/50 opacity-60"
-            }`}>
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-[10px] font-black text-slate-400">INSTITUTIONAL CLONER</span>
-                { (dailyBias.fiiDiiFlow === "BULLISH" && dailyBias.bias === "STRONG_BULL") || (dailyBias.fiiDiiFlow === "BEARISH" && dailyBias.bias === "STRONG_BEAR") ? (
-                  <span className="animate-pulse w-2 h-2 rounded-full bg-emerald-400" />
-                ) : (
-                  <span className="w-2 h-2 rounded-full bg-slate-700" />
-                )}
-              </div>
-              <div className="text-[10px] text-slate-500 leading-tight">
-                Follows FII/DII aggressive flows. <br/>
-                <span className="font-black mt-1 block">
-                  Status: {dailyBias.fiiDiiFlow === "BULLISH" && dailyBias.bias === "STRONG_BULL" ? <span className="text-emerald-400">READY (SMART MONEY BUY)</span> : dailyBias.fiiDiiFlow === "BEARISH" && dailyBias.bias === "STRONG_BEAR" ? <span className="text-red-400">READY (SMART MONEY SELL)</span> : "WAITING"}
-                </span>
-              </div>
-            </div>
-
+            ))}
           </div>
         ) : (
-          <div className="text-xs text-slate-500 animate-pulse py-2">Waiting for HTF Condition Monitor data...</div>
+          <div className="text-[9.5px] text-slate-600 animate-pulse font-mono py-1">Waiting for HTF Condition Monitor data...</div>
         )}
       </div>
 
       {/* ── Row 5: Signal Intelligence (Condensed) ────────────────────── */}
       {signalStats && (
-        <div className="rounded-lg border border-slate-800/60 bg-slate-900/40 p-2 flex items-center justify-between text-[9px] font-mono">
-          <div className="flex items-center gap-2">
-            <BarChart2 size={10} className="text-sky-400" />
-            <span className="text-slate-400 uppercase font-black">Signal Intel:</span>
+        <div className="rounded-lg border border-slate-900 bg-slate-950/40 p-1.5 px-2.5 flex items-center justify-between text-[10px] font-mono shadow-sm">
+          <div className="flex items-center gap-1.5">
+            <BarChart2 size={11} className="text-sky-400" />
+            <span className="text-slate-500 uppercase font-black tracking-wide">Signal Intel:</span>
           </div>
-          <div className="flex gap-4 items-center">
+          <div className="flex gap-3 items-center">
             <span className={`font-black ${signalStats.winRate >= 60 ? "text-emerald-400" : "text-amber-400"}`}>
               WR: {signalStats.winRate}% (W:{signalStats.wins} L:{signalStats.losses})
             </span>
-            <span className="text-slate-500">|</span>
-            <span className="text-slate-300">
+            <span className="text-slate-800">|</span>
+            <span className="text-slate-300 font-bold">
               VIX Edge: {signalStats.suggestAvoidHighVix ? <span className="text-amber-400">Avoid High</span> : "Neutral"}
             </span>
-            <span className="text-slate-500">|</span>
-            <span className="text-slate-300">
+            <span className="text-slate-800">|</span>
+            <span className="text-slate-300 font-bold">
               Time Edge: {signalStats.suggestAvoidMorning ? <span className="text-amber-400">Avoid Morning</span> : "Neutral"}
             </span>
           </div>
         </div>
       )}
 
-      {/* ── Row 6: Position Trade Calculator ──────────────────────────────── */}
-      <div className="rounded-xl border border-slate-800/60 bg-slate-900/30 p-4 relative overflow-hidden">
+      {/* ── Row 6: Position Trade Calculator (Tactile Grid Layout) ───────── */}
+      <div className="rounded-lg border border-slate-900 bg-gradient-to-br from-slate-950 to-slate-900 p-2.5 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-r from-violet-500/5 to-fuchsia-500/5 pointer-events-none" />
-        <div className="flex items-center justify-between mb-4 relative z-10">
-          <div className="flex items-center gap-2">
-            <PlusCircle size={16} className="text-violet-400" />
-            <span className="text-sm font-black text-slate-300 uppercase tracking-widest">Position Trade Calculator</span>
+        <div className="flex items-center justify-between mb-2 relative z-10">
+          <div className="flex items-center gap-1.5">
+            <PlusCircle size={13} className="text-violet-400" />
+            <span className="text-[11px] font-black text-slate-350 uppercase tracking-widest">Position Trade Calculator</span>
           </div>
           {calcResult && (
             <button
               onClick={() => setOpenTradeModal(true)}
-              className="text-[10px] px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-black hover:bg-emerald-500/30 transition-all"
+              className="text-[9.5px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-black hover:bg-emerald-500/30 transition-all uppercase tracking-wide"
             >
               ✅ OPEN TRADE
             </button>
           )}
         </div>
 
-        <div className="relative z-10 grid grid-cols-6 gap-3 items-end">
+        <div className="relative z-10 grid grid-cols-6 gap-2 items-end">
           {/* Direction */}
           <div className="col-span-1">
-            <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1">Direction</label>
+            <label className="text-[8px] text-slate-500 uppercase tracking-wider block mb-1 font-bold">Direction</label>
             <div className="flex gap-1">
               <button
                 onClick={() => setCalcForm(f => ({ ...f, direction: "BUY_CE" }))}
-                className={`flex-1 py-1.5 rounded text-[10px] font-black transition-all ${
+                className={`flex-1 py-1 rounded text-[10px] font-black transition-all ${
                   calcForm.direction === "BUY_CE"
                     ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40"
-                    : "bg-slate-800/60 text-slate-500 border border-slate-700/40 hover:border-slate-600"
+                    : "bg-slate-900/80 text-slate-500 border border-slate-800 hover:border-slate-700"
                 }`}
               >
                 CE ▲
               </button>
               <button
                 onClick={() => setCalcForm(f => ({ ...f, direction: "BUY_PE" }))}
-                className={`flex-1 py-1.5 rounded text-[10px] font-black transition-all ${
+                className={`flex-1 py-1 rounded text-[10px] font-black transition-all ${
                   calcForm.direction === "BUY_PE"
-                    ? "bg-red-500/20 text-red-400 border border-red-500/40"
-                    : "bg-slate-800/60 text-slate-500 border border-slate-700/40 hover:border-slate-600"
+                    ? "bg-rose-500/20 text-rose-400 border border-rose-500/40"
+                    : "bg-slate-900/80 text-slate-500 border border-slate-800 hover:border-slate-700"
                 }`}
               >
                 PE ▼
@@ -1014,51 +971,51 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
 
           {/* Entry Price */}
           <div className="col-span-1">
-            <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1">Entry Premium ₹</label>
+            <label className="text-[8px] text-slate-500 uppercase tracking-wider block mb-1 font-bold">Entry Premium ₹</label>
             <input
               type="number"
               value={calcForm.entryPrice || ""}
               onChange={e => setCalcForm(f => ({ ...f, entryPrice: parseFloat(e.target.value) || 0 }))}
               placeholder="e.g. 250"
-              className="w-full bg-slate-800/80 border border-slate-700/50 rounded px-2 py-1.5 text-[11px] text-white font-mono focus:border-violet-500/60 focus:outline-none transition-all"
+              className="w-full bg-slate-950 border border-slate-800 rounded px-1.5 py-1 text-[11px] text-white font-mono font-bold focus:border-violet-500/60 focus:outline-none transition-all"
             />
           </div>
 
           {/* Strike */}
           <div className="col-span-1">
-            <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1">Strike (0=ATM)</label>
+            <label className="text-[8px] text-slate-500 uppercase tracking-wider block mb-1 font-bold">Strike (0=ATM)</label>
             <input
               type="number"
               value={calcForm.strike || ""}
               onChange={e => setCalcForm(f => ({ ...f, strike: parseFloat(e.target.value) || 0 }))}
               placeholder="Auto ATM"
-              className="w-full bg-slate-800/80 border border-slate-700/50 rounded px-2 py-1.5 text-[11px] text-white font-mono focus:border-violet-500/60 focus:outline-none transition-all"
+              className="w-full bg-slate-950 border border-slate-800 rounded px-1.5 py-1 text-[11px] text-white font-mono font-bold focus:border-violet-500/60 focus:outline-none transition-all"
             />
           </div>
 
           {/* Lots */}
           <div className="col-span-1">
-            <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1">Lots</label>
+            <label className="text-[8px] text-slate-500 uppercase tracking-wider block mb-1 font-bold">Lots</label>
             <input
               type="number"
               min={1}
               max={10}
               value={calcForm.lots}
               onChange={e => setCalcForm(f => ({ ...f, lots: Math.max(1, parseInt(e.target.value) || 1) }))}
-              className="w-full bg-slate-800/80 border border-slate-700/50 rounded px-2 py-1.5 text-[11px] text-white font-mono focus:border-violet-500/60 focus:outline-none transition-all"
+              className="w-full bg-slate-950 border border-slate-800 rounded px-1.5 py-1 text-[11px] text-white font-mono font-bold focus:border-violet-500/60 focus:outline-none transition-all"
             />
           </div>
 
           {/* Days to Expiry */}
           <div className="col-span-1">
-            <label className="text-[9px] text-slate-500 uppercase tracking-widest block mb-1">Days to Expiry</label>
+            <label className="text-[8px] text-slate-500 uppercase tracking-wider block mb-1 font-bold">Expiry Days</label>
             <input
               type="number"
               min={1}
               max={30}
               value={calcForm.daysToExpiry}
               onChange={e => setCalcForm(f => ({ ...f, daysToExpiry: Math.max(1, parseInt(e.target.value) || 7) }))}
-              className="w-full bg-slate-800/80 border border-slate-700/50 rounded px-2 py-1.5 text-[11px] text-white font-mono focus:border-violet-500/60 focus:outline-none transition-all"
+              className="w-full bg-slate-950 border border-slate-800 rounded px-1.5 py-1 text-[11px] text-white font-mono font-bold focus:border-violet-500/60 focus:outline-none transition-all"
             />
           </div>
 
@@ -1067,30 +1024,30 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
             <button
               onClick={handleCalcSetup}
               disabled={calcLoading || !calcForm.entryPrice}
-              className={`w-full py-1.5 rounded-lg text-[10px] font-black transition-all ${
+              className={`w-full py-1.5 rounded text-[10px] font-black transition-all ${
                 calcLoading || !calcForm.entryPrice
-                  ? "bg-slate-800 text-slate-600 cursor-not-allowed"
-                  : "bg-violet-600 hover:bg-violet-500 text-white shadow-lg shadow-violet-500/20"
+                  ? "bg-slate-900 text-slate-600 cursor-not-allowed border border-slate-800"
+                  : "bg-violet-650 hover:bg-violet-550 text-white shadow shadow-violet-500/20"
               }`}
             >
-              {calcLoading ? "Computing..." : "⚡ CALCULATE"}
+              {calcLoading ? "CALC..." : "⚡ CALCULATE"}
             </button>
           </div>
         </div>
 
-        {/* Result Preview */}
+        {/* Result Preview (High-contrast numbers) */}
         {calcResult && (
-          <div className="relative z-10 mt-4 grid grid-cols-5 gap-3">
+          <div className="relative z-10 mt-2.5 grid grid-cols-5 gap-2">
             {[
-              { label: "Stop Loss (50%)", value: `₹${calcResult.slPrice}`, color: "#ef4444" },
+              { label: "Stop Loss (50%)", value: `₹${calcResult.slPrice}`, color: "#f43f5e" },
               { label: "Target 1 (50%)", value: `₹${calcResult.target1}`, color: "#3b82f6" },
               { label: "Target 2 (100%)", value: `₹${calcResult.target2}`, color: "#10b981" },
-              { label: "Daily θ Decay", value: `-₹${calcResult.dailyTheta}/day`, color: "#f59e0b" },
-              { label: "Breakeven Days", value: `${calcResult.breakevenDays}d`, color: "#8b5cf6" },
+              { label: "Daily θ Decay", value: `-₹${calcResult.dailyTheta}/d`, color: "#f59e0b" },
+              { label: "Breakeven Days", value: `${calcResult.breakevenDays}d`, color: "#a855f7" },
             ].map(r => (
-              <div key={r.label} className="bg-slate-900/60 rounded-lg p-2 text-center border border-slate-800/50">
-                <div className="text-[9px] text-slate-500 mb-0.5">{r.label}</div>
-                <div className="text-sm font-black" style={{ color: r.color }}>{r.value}</div>
+              <div key={r.label} className="bg-slate-950/60 rounded p-1.5 text-center border border-slate-900">
+                <div className="text-[8px] text-slate-500 uppercase tracking-wide mb-0.5 leading-none">{r.label}</div>
+                <div className="text-[12.5px] font-black font-mono" style={{ color: r.color }}>{r.value}</div>
               </div>
             ))}
           </div>
@@ -1099,36 +1056,36 @@ const PositionTradingDashboard: React.FC<Props> = ({ activePage, spotPrice, dark
 
       {/* ── Confirm Trade Modal ─────────────────────────────────────────────── */}
       {openTradeModal && calcResult && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700/60 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-black text-white">Confirm Position Trade</h3>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-950 border border-slate-900 rounded-xl p-5 w-full max-w-sm shadow-2xl">
+            <div className="flex items-center justify-between mb-3 border-b border-slate-900 pb-2">
+              <h3 className="text-sm font-black text-white uppercase tracking-wider">Confirm Position Trade</h3>
               <button onClick={() => setOpenTradeModal(false)} className="text-slate-500 hover:text-white">
-                <X size={16} />
+                <X size={15} />
               </button>
             </div>
 
-            <div className="space-y-2 mb-6">
+            <div className="space-y-1.5 mb-5 font-mono">
               {[
                 { label: "Instrument", value: `${inst} ${calcForm.direction === "BUY_CE" ? "CE" : "PE"}` },
                 { label: "Entry Premium", value: `₹${calcResult.entryPrice}` },
-                { label: "Stop Loss", value: `₹${calcResult.slPrice} (50%)`, color: "#ef4444" },
+                { label: "Stop Loss", value: `₹${calcResult.slPrice} (50%)`, color: "#f43f5e" },
                 { label: "Target 2x", value: `₹${calcResult.target2}`, color: "#10b981" },
                 { label: "Lots", value: `${calcResult.lots} × ${calcResult.lotSize} units` },
                 { label: "Max Risk", value: `₹${((calcResult.entryPrice - calcResult.slPrice) * calcResult.lots * calcResult.lotSize).toLocaleString("en-IN")}`, color: "#f97316" },
               ].map(r => (
-                <div key={r.label} className="flex justify-between py-1 border-b border-slate-800/60">
-                  <span className="text-xs text-slate-400">{r.label}</span>
+                <div key={r.label} className="flex justify-between py-1 border-b border-slate-900">
+                  <span className="text-xs text-slate-500 font-bold">{r.label}</span>
                   <span className="text-xs font-black" style={{ color: r.color ?? "#fff" }}>{r.value}</span>
                 </div>
               ))}
             </div>
 
             <div className="flex gap-2">
-              <button onClick={() => setOpenTradeModal(false)} className="flex-1 py-2 rounded-lg bg-slate-800 text-slate-400 text-sm font-black">
+              <button onClick={() => setOpenTradeModal(false)} className="flex-1 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-slate-400 text-xs font-black">
                 Cancel
               </button>
-              <button onClick={handleOpenTrade} className="flex-1 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-black">
+              <button onClick={handleOpenTrade} className="flex-1 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black">
                 ✅ Open Trade
               </button>
             </div>

@@ -8,7 +8,7 @@ import React, { useState, useMemo, lazy, Suspense, useEffect, useCallback } from
 import TradingEngineLayout, { type TEPage } from "./TradingEngineLayout";
 import type { StockData, OptionStrike, AIAnalysisPayload } from "../../types";
 
-// ── Eager-loaded (Priority 1) ────────────────────────────────────────────────
+// â”€â”€ Eager-loaded (Priority 1) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 import AmexGatingDashboard from "../AmexGatingDashboard";
 import AISignals from "./pages/AISignals";
 import MarketBreadth from "./pages/MarketBreadth";
@@ -20,7 +20,7 @@ import ORBAutomationTab from "./pages/ORBAutomationTab";
 import AutoStrategyTab from "./pages/AutoStrategyTab";
 
 
-// ── Eager-loaded Card Components ─────────────────────────────────────────────
+// â”€â”€ Eager-loaded Card Components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 import MarketRegimeCard from "../MarketRegimeCard";
 import MarketBreadthCard from "../MarketBreadthCard";
 import HeavyweightCard from "./pages/HeavyweightCard";
@@ -39,8 +39,9 @@ import PerformanceCard from "./pages/PerformanceCard";
 import RiskCard from "./pages/RiskCard";
 import LiveSignalFeedCard from "./pages/LiveSignalFeedCard";
 import InstitutionalMacroCard from "./pages/InstitutionalMacroCard";
+import BestSetupDeck from "./pages/BestSetupDeck";
 
-// ── Layer Engines ────────────────────────────────────────────────────────────
+// â”€â”€ Layer Engines â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 import { computeMarketTime } from "../../engine/marketTimeEngine";
 import { computeOptionFlow } from "../../engine/optionFlowEngine";
 import { computeMarketBreadth } from "../../engine/marketBreadthEngine";
@@ -68,7 +69,7 @@ import { useGlobalMacroSentiment } from "../../hooks/useGlobalMacroSentiment";
 import { computeInstitutionalMacro } from "../../engine/institutionalMacroEngine";
 import { type TEPaperTrade } from "../../types";
 
-// ── Lazy-loaded (Priority 2+) ────────────────────────────────────────────────
+// â”€â”€ Lazy-loaded (Priority 2+) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const TradeJournal      = lazy(() => import("./pages/TradeJournal"));
 const RiskManager       = lazy(() => import("./pages/RiskManager"));
 const PerformanceAnalytics = lazy(() => import("./pages/PerformanceAnalytics"));
@@ -83,7 +84,7 @@ const AdvanceAI = lazy(() => import("../AdvanceAI"));
 const ProcessorTab = lazy(() => import("./pages/ProcessorTab"));
 const ContinuousScalpTab = lazy(() => import("./pages/ContinuousScalpTab"));
 
-// ── Props ────────────────────────────────────────────────────────────────────
+// â”€â”€ Props â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export interface TradingEngineProps {
   niftyStocks: StockData[];
   sensexStocks: StockData[];
@@ -125,11 +126,11 @@ export interface TradingEngineProps {
   declines: number;
   top10ScoresSum: number;
   next15ScoresSum: number;
-  /** Score backup for Score Candle chart — { symbol: { time: score } } */
+  /** Score backup for Score Candle chart â€” { symbol: { time: score } } */
   niftyBackup?: Record<string, Record<string, number>>;
   sensexBackup?: Record<string, Record<string, number>>;
   bankniftyBackup?: Record<string, Record<string, number>>;
-  // ── Intraday day combination data ───────────────────────────────────────
+  // â”€â”€ Intraday day combination data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   dayOpen?:  number;
   dayHigh?:  number;
   dayLow?:   number;
@@ -146,7 +147,7 @@ export interface TradingEngineProps {
   clearAlertHistory?: any;
 }
 
-// ── Page Spinner ─────────────────────────────────────────────────────────────
+// â”€â”€ Page Spinner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const PageLoader = () => (
   <div className="flex items-center justify-center h-64">
     <div className="flex items-center gap-3 text-slate-500">
@@ -156,9 +157,9 @@ const PageLoader = () => (
   </div>
 );
 
-// ── Main Component ───────────────────────────────────────────────────────────
+// â”€â”€ Main Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const TradingEngine: React.FC<TradingEngineProps> = (props) => {
-  const [activeTEPage, setActiveTEPage] = useState<TEPage>("ENGINES");
+  const [activeTEPage, setActiveTEPage] = useState<TEPage>("BEST_SETUP");
 
   const {
     niftyStocks, sensexStocks, bankniftyStocks = [], legacyOptionChain, optionChain,
@@ -198,10 +199,10 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
   const sortedByWeightage = useMemo(() => [...currentStocksOnly].sort((a, b) => (b.weightage || 0) - (a.weightage || 0)), [currentStocksOnly]);
   const top25 = useMemo(() => sortedByWeightage.slice(0, activePage === "BANKNIFTY" ? 12 : (activePage === "SENSEX" ? 22 : 25)), [sortedByWeightage, activePage]);
 
-  // ── AMEX Layer 19: Global Macro Sentiment ─────────────────────────
+  // â”€â”€ AMEX Layer 19: Global Macro Sentiment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const macroSentimentResult = useGlobalMacroSentiment();
 
-  // ── Database Sync States ──────────────────────────────────────────────────
+  // â”€â”€ Database Sync States â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [dbTrades, setDbTrades] = useState<TEPaperTrade[]>([]);
   const loadTrades = useCallback(async () => {
     try {
@@ -232,8 +233,8 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
     }
   }, []);
 
-  // ── 5M Candles for Reversal Indicator Calculation ────────────────────────────────
-  // Used by AutoStrategyTab → computeReversalFrontend() to compute
+  // â”€â”€ 5M Candles for Reversal Indicator Calculation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Used by AutoStrategyTab â†’ computeReversalFrontend() to compute
   // RSI, MFI, LR Angle, Stochastic, Momentum, ORB High/Low, Gap% etc.
   const [candles5m, setCandles5m] = useState<Array<{
     time: number; open: number; high: number; low: number; close: number; volume: number;
@@ -243,7 +244,7 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
     try {
       const isLocal = typeof window !== "undefined" && (window.location.port === "5173" || window.location.protocol === "file:");
       const base   = isLocal ? "http://localhost:3000" : "";
-      // Map activePage → instrument name expected by the API
+      // Map activePage â†’ instrument name expected by the API
       const instrument = activePage === "SENSEX" ? "SENSEX" : activePage === "BANKNIFTY" ? "BANKNIFTY" : "NIFTY";
 
       // Try enriched endpoint first (returns objects with all indicators)
@@ -280,7 +281,7 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
         }
       }
     } catch (e) {
-      // Silently ignore — indicator engine handles missing data gracefully
+      // Silently ignore â€” indicator engine handles missing data gracefully
     }
   }, [activePage]);
 
@@ -292,7 +293,7 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
     return () => clearInterval(id);
   }, [loadCandles5m]);
 
-  // Real-time candle update via socket — fires on every 5M bar close
+  // Real-time candle update via socket â€” fires on every 5M bar close
   // Server emits 'index-candles-update' from onCandleBroadcast when a new candle closes
   useEffect(() => {
     if (!socket) return;
@@ -346,7 +347,7 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
     return computeInstitutionalMacro(fiiDiiHistory);
   }, [fiiDiiHistory]);
 
-  // ── Core Engine Live Computations (L1 - L16) ──────────────────────────────
+  // â”€â”€ Core Engine Live Computations (L1 - L16) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [lastActiveStrategy, setLastActiveStrategy] = useState<string>("NO_STRATEGY");
   const [previousStrategyScore, setPreviousStrategyScore] = useState<number>(0);
   const [switchHistory, setSwitchHistory] = useState<string[]>([]);
@@ -359,7 +360,7 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
     return () => clearInterval(clockInterval);
   }, []);
 
-  // ── Sync dayHighScore & dayLowScore in date-keyed localStorage ──
+  // â”€â”€ Sync dayHighScore & dayLowScore in date-keyed localStorage â”€â”€
   const [dayHighScore, setDayHighScore] = useState<number>(() => {
     const dateKey = new Date().toDateString();
     const saved = localStorage.getItem(`codetrade-day-high-score-${activePage}-${dateKey}`);
@@ -630,7 +631,7 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
       strategyAlignmentResult,
       indiaVix: optionChain?.indiaVix,
       spotChangePct: optionChain?.spotChangePct,
-      marketTimeResult, // ── AMEX: market-hours hard gate
+      marketTimeResult, // â”€â”€ AMEX: market-hours hard gate
     }),
     [regimeResult, breadthResult, heavyweightResult, range15mResult,
      optionChainResult, momentumResult, smartMoneyResult, probabilityResult,
@@ -749,7 +750,7 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
     [paperTradingResult, performanceResult, currentSpot, activePage, optionChain, regimeResult.regime, aiDecisionResult.decisionConfidence, legacyOptionChain]
   );
 
-  // ── RTPODE: Real-Time Profit Opportunity Detection Engine ──
+  // â”€â”€ RTPODE: Real-Time Profit Opportunity Detection Engine â”€â”€
   const rtpodeResult = useMemo(() =>
     computeRTPODE({
       spotPrice: currentSpot,
@@ -778,7 +779,7 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
      oiTotals, regimeData, range15m]
   );
 
-  // ── Multi-Index Option Intelligence Engine ───────────────────────────────
+  // â”€â”€ Multi-Index Option Intelligence Engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const multiIndexResult = useMemo(() =>
     computeMultiIndexOption({
       activePage,
@@ -800,7 +801,7 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
      niftySpot, bankniftySpot, sensexSpot, optionChain?.indiaVix]
   );
 
-  // ── AMEX Option Buying Setup Engine (L15) ────────────────────────────────
+  // â”€â”€ AMEX Option Buying Setup Engine (L15) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const optionBuyingSetup = useMemo(() =>
     computeOptionBuyingSetup({
       aiDecisionResult,
@@ -820,7 +821,7 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
      momentumResult, legacyOptionChain, currentSpot, activePage, optionChain?.indiaVix]
   );
 
-  // ── AMEX L17: Signal Memory Engine ──────────────────────────────────
+  // â”€â”€ AMEX L17: Signal Memory Engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const signalMemoryResult = useMemo(() =>
     computeSignalMemory({
       currentDirection:  aiDecisionResult.finalDecision as any,
@@ -845,10 +846,10 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
      activePage, paperTradingResult.closedPositions]
   );
 
-  // ── AMEX L18: Pattern Recognition Engine ───────────────────────────
+  // â”€â”€ AMEX L18: Pattern Recognition Engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const patternResult = useMemo(() =>
     computePatternRecognition({
-      candles:          [],   // ProLiveChart feeds candles separately — pass empty for now
+      candles:          [],   // ProLiveChart feeds candles separately â€” pass empty for now
       spotPrice:        currentSpot,
       prevClose:        prevClose ?? 0,
       maxPain:          optionChainResult?.maxPainStrike ?? 0,
@@ -861,7 +862,7 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
      oiTotals.totalCallOIChange, oiTotals.totalPutOIChange, optionChain?.indiaVix]
   );
 
-  // ── AMEX L16: AI Brain Master Synthesizer ─────────────────────────
+  // â”€â”€ AMEX L16: AI Brain Master Synthesizer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const aiBrainResult = useMemo(() =>
     computeAiBrain({
       aiDecisionResult,
@@ -909,6 +910,18 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
 
   const renderPage = () => {
     switch (activeTEPage) {
+
+      // â”€â”€ 10X BEST SETUP DECK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      case "BEST_SETUP":
+        return (
+          <div className="w-full p-3">
+            <BestSetupDeck
+              activePage={activePage}
+              spotPrice={currentSpot}
+            />
+          </div>
+        );
+
       case "ENGINES":
         return (
           <Engines
@@ -951,7 +964,7 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
                 <span className="text-xs text-slate-500 font-mono">REGIME ENGINE</span>
               </div>
               <h1 className="text-xl font-black text-white tracking-tight">Market Regime Classifier</h1>
-              <p className="text-sm text-slate-400 mt-0.5">Real-time market regime classification engine — {activePage}</p>
+              <p className="text-sm text-slate-400 mt-0.5">Real-time market regime classification engine â€” {activePage}</p>
             </div>
             <MarketRegimeCard
               activePage={activePage}
@@ -983,7 +996,7 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
                 <span className="text-xs text-slate-500 font-mono">BREADTH ENGINE</span>
               </div>
               <h1 className="text-xl font-black text-white tracking-tight">Market Breadth Analysis</h1>
-              <p className="text-sm text-slate-400 mt-0.5">Constituent stock participation &amp; advances/declines — {activePage}</p>
+              <p className="text-sm text-slate-400 mt-0.5">Constituent stock participation &amp; advances/declines â€” {activePage}</p>
             </div>
             <MarketBreadthCard
               activePage={activePage}
@@ -1274,7 +1287,7 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
           <div className="w-full p-6 space-y-5">
             <div className="border-b border-slate-800/40 pb-5">
               <h1 className="text-lg font-black text-white">Layer 14: Simulated Auto Trading Console</h1>
-              <p className="text-sm text-slate-500">Virtual ₹15k margin account auto execution simulation ({activePage})</p>
+              <p className="text-sm text-slate-500">Virtual â‚¹15k margin account auto execution simulation ({activePage})</p>
             </div>
             <PaperTradingCard
               activePage={activePage}
@@ -1686,4 +1699,5 @@ const TradingEngine: React.FC<TradingEngineProps> = (props) => {
 };
 
 export default TradingEngine;
+
 

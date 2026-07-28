@@ -1118,26 +1118,27 @@ const Engines: React.FC<EnginesProps> = (props) => {
       {/* ── HEADER ───────────────────────────────────────────────────────── */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/40 pb-4">
         <div>
-          <h1 className="text-xl font-black text-white flex items-center gap-2">
-            <Layers size={18} className="text-indigo-400" /> Trading Engine Workspace
+          <h1 className="text-2xl font-black text-white flex items-center gap-2 tracking-tight">
+            <Layers size={22} className="text-indigo-400 animate-pulse" /> Dynamic Trading Engine Workspace
           </h1>
-          <p className="text-base text-slate-500 mt-0.5">
-            Institutional 16-Layer intelligence stack · {activePage} Instruments
+          <p className="text-sm font-semibold text-indigo-300/80 mt-0.5 flex items-center gap-2">
+            <Sparkles size={14} className="text-indigo-400" />
+            Institutional 17-Layer Real-Time Intelligence Stack · {activePage} Instruments
           </p>
         </div>
 
         {/* Global Pipeline Status */}
         <div className="flex items-center gap-3">
-          <div className="px-3 py-1.5 rounded-lg border border-slate-800/80 bg-[#08101a] flex items-center gap-2">
-            <Activity size={12} className="text-indigo-400 animate-pulse" />
-            <div className="text-sm font-bold text-slate-400">
-              Pipeline Active: <span className="text-indigo-400">{readyCount} / 16 Layers Ready</span>
+          <div className="px-3 py-1.5 rounded-lg border border-indigo-500/30 bg-[#08101a] flex items-center gap-2 shadow-[0_0_15px_rgba(99,102,241,0.15)]">
+            <Activity size={13} className="text-indigo-400 animate-pulse" />
+            <div className="text-xs font-bold text-slate-300">
+              Trading Engine: <span className="text-indigo-400 font-black">{readyCount} / 17 Layers Active</span>
             </div>
           </div>
-          <div className="px-3 py-1.5 rounded-lg border border-emerald-900/30 bg-emerald-900/5 flex items-center gap-1.5">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-            <div className="text-sm font-black font-mono text-emerald-400 uppercase tracking-wider">
-              Feed: Live Data Stream
+          <div className="px-3 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-950/20 flex items-center gap-1.5 shadow-[0_0_12px_rgba(16,185,129,0.15)]">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
+            <div className="text-xs font-black font-mono text-emerald-400 uppercase tracking-widest">
+              Live Dynamic Stream
             </div>
           </div>
         </div>

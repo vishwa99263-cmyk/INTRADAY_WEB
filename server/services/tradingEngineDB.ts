@@ -100,6 +100,33 @@ function initTables(db: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_te_shadow_ts ON te_shadow_trades(timestamp DESC);
 
+    CREATE TABLE IF NOT EXISTS te_swing_trades (
+      id            TEXT PRIMARY KEY,
+      symbol        TEXT NOT NULL,
+      direction     TEXT NOT NULL,
+      trade_type    TEXT NOT NULL DEFAULT 'EQUITY',
+      option_type   TEXT,
+      strike        REAL,
+      expiry        TEXT,
+      entry_price   REAL NOT NULL,
+      qty           INTEGER NOT NULL,
+      lot_size      INTEGER NOT NULL DEFAULT 1,
+      stop_loss     REAL NOT NULL,
+      target1       REAL NOT NULL,
+      target2       REAL,
+      target3       REAL,
+      risk_reward   REAL NOT NULL,
+      status        TEXT NOT NULL DEFAULT 'OPEN',
+      notes         TEXT DEFAULT '',
+      created_at    INTEGER NOT NULL,
+      closed_at     INTEGER,
+      exit_price    REAL,
+      signal_basis  TEXT DEFAULT '',
+      sector_theme  TEXT DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_te_swing_ts ON te_swing_trades(created_at DESC);
+
     CREATE TABLE IF NOT EXISTS te_lot_config (
       instrument    TEXT PRIMARY KEY,
       lot_size      INTEGER NOT NULL,
@@ -308,6 +335,16 @@ export function getPaperTrades(status?: "OPEN" | "CLOSED", limit = 1000): TEPape
   } catch (e: any) {
     console.error("[TradingEngineDB] getPaperTrades error:", e.message);
     return [];
+  }
+}
+
+export function getPaperTradeById(id: string): TEPaperTrade | undefined {
+  try {
+    const db = getDB();
+    return db.prepare("SELECT * FROM te_paper_trades WHERE id = ?").get(id) as TEPaperTrade | undefined;
+  } catch (e: any) {
+    console.error("[TradingEngineDB] getPaperTradeById error:", e.message);
+    return undefined;
   }
 }
 
@@ -550,5 +587,119 @@ export function getFiiDiiHistory(limit = 30): TEFiiDii[] {
   } catch (e: any) {
     console.error("[TradingEngineDB] getFiiDiiHistory error:", e.message);
     return [];
+  }
+}
+
+// ── Swing Trades ───────────────────────────────────────────────────────────────
+
+export interface TESwingTrade {
+  id: string;
+  symbol: string;
+  direction: "LONG" | "SHORT";
+  trade_type: "EQUITY" | "OPTION";
+  option_type?: "CE" | "PE" | null;
+  strike?: number | null;
+  expiry?: string | null;
+  entry_price: number;
+  qty: number;
+  lot_size: number;
+  stop_loss: number;
+  target1: number;
+  target2?: number | null;
+  target3?: number | null;
+  risk_reward: number;
+  status: "OPEN" | "TARGET_HIT" | "SL_HIT" | "EXITED" | "PENDING";
+  notes?: string;
+  created_at: number;
+  closed_at?: number | null;
+  exit_price?: number | null;
+  signal_basis?: string;
+  sector_theme?: string;
+}
+
+export function saveSwingTrade(trade: TESwingTrade): void {
+  try {
+    const db = getDB();
+    db.prepare(`
+      INSERT OR REPLACE INTO te_swing_trades
+      (id, symbol, direction, trade_type, option_type, strike, expiry, entry_price, qty, lot_size, stop_loss, target1, target2, target3, risk_reward, status, notes, created_at, closed_at, exit_price, signal_basis, sector_theme)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      trade.id,
+      trade.symbol,
+      trade.direction,
+      trade.trade_type,
+      trade.option_type ?? null,
+      trade.strike ?? null,
+      trade.expiry ?? null,
+      trade.entry_price,
+      trade.qty,
+      trade.lot_size,
+      trade.stop_loss,
+      trade.target1,
+      trade.target2 ?? null,
+      trade.target3 ?? null,
+      trade.risk_reward,
+      trade.status,
+      trade.notes ?? "",
+      trade.created_at,
+      trade.closed_at ?? null,
+      trade.exit_price ?? null,
+      trade.signal_basis ?? "",
+      trade.sector_theme ?? "",
+    );
+  } catch (e: any) {
+    console.error("[TradingEngineDB] saveSwingTrade error:", e.message);
+  }
+}
+
+export function getSwingTrades(status?: string, limit = 1000): TESwingTrade[] {
+  try {
+    const db = getDB();
+    let query = "SELECT * FROM te_swing_trades";
+    const conditions: string[] = ["1=1"];
+    const params: any[] = [];
+
+    if (status) {
+      conditions.push("status = ?");
+      params.push(status);
+    }
+
+    query += " WHERE " + conditions.join(" AND ");
+    query += " ORDER BY created_at DESC LIMIT ?";
+    params.push(limit);
+
+    return db.prepare(query).all(...params) as TESwingTrade[];
+  } catch (e: any) {
+    console.error("[TradingEngineDB] getSwingTrades error:", e.message);
+    return [];
+  }
+}
+
+export function closeSwingTrade(
+  id: string,
+  exitPrice: number,
+  status: string,
+): boolean {
+  try {
+    const db = getDB();
+    const result = db.prepare(
+      "UPDATE te_swing_trades SET status = ?, exit_price = ?, closed_at = ? WHERE id = ?"
+    ).run(status, exitPrice, Date.now(), id);
+    return (result.changes ?? 0) > 0;
+  } catch (e: any) {
+    console.error("[TradingEngineDB] closeSwingTrade error:", e.message);
+    return false;
+  }
+}
+
+export function deleteSwingTrade(id: string): boolean {
+  try {
+    const db = getDB();
+    const result = db.prepare("DELETE FROM te_swing_trades WHERE id = ?").run(id);
+    return (result.changes ?? 0) > 0;
+  } catch (e: any) {
+    console.error("[TradingEngineDB] deleteSwingTrade error:", e.message);
+    return false;
   }
 }

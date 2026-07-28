@@ -47,11 +47,16 @@ import ProLiveChart from "./components/charts/ProLiveChart";
 import { computeMarketRegime, type RegimeEngineInput } from "./engine/marketRegimeEngine";
 import { useTradeAlarm } from "./hooks/useTradeAlarm";
 import SelfLearningPermissionCard from "./components/SelfLearningPermissionCard";
+import PendingTradeApproval from "./components/PendingTradeApproval";
+import RealTradeTab from "./components/RealTradeTab";
+import TradeJournal from "./components/TradeJournal";
+import SwingTradeSystem from "./components/SwingTradeSystem";
+import JarvisTradingEngine from "./components/JarvisTradingEngine";
 
 import {
   Menu, Moon, Sun, ShieldCheck, RefreshCw, FileText,
   Layers, ChevronRight, Check, AlertCircle, BarChart2, TrendingUp, Info, Zap, BookOpen,
-  Download, Upload, Trash2
+  Download, Upload, Trash2, Cpu
 } from "lucide-react";
 
 // Preserve old OptionStrike shape for OptionChainGrid prop compatibility
@@ -280,7 +285,7 @@ const getLast10MarketOpenDays = () => {
 export default function App() {
   // â”€â”€ UI state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [activePage, setActivePage] = useState<"NIFTY" | "SENSEX" | "BANKNIFTY" | "HDFCBANK" | "RELIANCE" | "ICICIBANK" | "CUSTOM_STOCK">("NIFTY");
-  const [activeTab, setActiveTab] = useState<"LIVE" | "STOCK" | "OPTION" | "BACKUP" | "FYERS" | "TRADING" | "CHART" | "STOCK_ANALYSIS">("LIVE");
+  const [activeTab, setActiveTab] = useState<"LIVE" | "STOCK" | "OPTION" | "BACKUP" | "FYERS" | "TRADING" | "CHART" | "STOCK_ANALYSIS" | "REAL_TRADE" | "JOURNAL" | "SWING" | "JARVIS">("LIVE");
 
   const [darkMode, setDarkMode] = useState(true);
   const [showSelfLearningCard, setShowSelfLearningCard] = useState(false);
@@ -300,17 +305,29 @@ export default function App() {
 
   // ── Database Sync States for Paper Trading ──
   const [dbTrades, setDbTrades] = useState<TEPaperTrade[]>([]);
+  const [realTrades, setRealTrades] = useState<any[]>([]);
+  const [showRealPositions, setShowRealPositions] = useState<boolean>(false);
+
   const loadTrades = useCallback(async () => {
     try {
       const isLocal = typeof window !== "undefined" && (window.location.port === "5173" || window.location.protocol === "file:");
-      const apiUrl = `${isLocal ? "http://localhost:3000" : ""}/api/te/paper-trades`;
-      const res = await fetch(apiUrl);
-      if (res.ok) {
-        const d = await res.json();
+      const apiBase = isLocal ? "http://localhost:3000" : "";
+      
+      const [paperRes, realRes] = await Promise.all([
+        fetch(`${apiBase}/api/te/paper-trades`),
+        fetch(`${apiBase}/api/real-trades`)
+      ]);
+      
+      if (paperRes.ok) {
+        const d = await paperRes.json();
         setDbTrades(d.trades || []);
       }
+      if (realRes.ok) {
+        const d = await realRes.json();
+        setRealTrades(d.trades || []);
+      }
     } catch (e) {
-      console.error("Failed to load paper trades in main App:", e);
+      console.error("Failed to load trades in main App:", e);
     }
   }, []);
 
@@ -319,6 +336,29 @@ export default function App() {
     const interval = setInterval(loadTrades, 4000);
     return () => clearInterval(interval);
   }, [loadTrades]);
+
+
+  // ── TEST SCALP Connection Verification ──
+  const [testScalpLoading, setTestScalpLoading] = useState(false);
+  const handleTestScalp = async () => {
+    if (testScalpLoading) return;
+    setTestScalpLoading(true);
+    try {
+      const isLocal = typeof window !== "undefined" && (window.location.port === "5173" || window.location.protocol === "file:");
+      const apiBase = isLocal ? "http://localhost:3000" : "";
+      const res = await fetch(`${apiBase}/api/te/test-scalp`, { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        alert(`✅ Test scalp order sent:\n${data.message}`);
+      } else {
+        alert(`❌ Test scalp failed:\n${data.error || data.message}`);
+      }
+    } catch (e: any) {
+      alert(`❌ Test scalp error: ${e.message}`);
+    } finally {
+      setTestScalpLoading(false);
+    }
+  };
 
   // ── Pattern / Velocity Data ──
   const [patternSummary, setPatternSummary] = useState<any | null>(null);
@@ -431,6 +471,27 @@ export default function App() {
 
   // ── Trade Alarm System ─────────────────────────────────────────────────────────
   const { alarmHistory, latestAlarm, notifAllowed, requestPermission } = useTradeAlarm(socket);
+
+  // Listen to real-trade-update socket events
+  useEffect(() => {
+    if (!socket) return;
+    const handleRealTradeUpdate = (data: any) => {
+      if (data?.trades) {
+        setRealTrades(data.trades);
+      }
+    };
+    const handleToastTrigger = (data: any) => {
+      if (data?.title && data?.message) {
+        console.log(`[Toast] ${data.title}: ${data.message}`);
+      }
+    };
+    socket.on("real-trade-update", handleRealTradeUpdate);
+    socket.on("toast-trigger", handleToastTrigger);
+    return () => {
+      socket.off("real-trade-update", handleRealTradeUpdate);
+      socket.off("toast-trigger", handleToastTrigger);
+    };
+  }, [socket]);
 
   // ── Database averages for Live Nifty volume multipliers ──
   const [averages5dMap, setAverages5dMap] = useState<Record<string, number>>({});
@@ -1588,6 +1649,10 @@ export default function App() {
       {showSelfLearningCard && (
         <SelfLearningPermissionCard onDismiss={() => setShowSelfLearningCard(false)} />
       )}
+
+      {/* ── Shadow-Trade Approval Notification Panel (floating, bottom-right) ── */}
+      <PendingTradeApproval darkMode={darkMode} />
+
       {/* â”€â”€ Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <header className="flex items-center justify-between px-4 py-2 border-b border-gray-300 select-none bg-white text-black">
         <div className="flex items-center gap-4 md:gap-6">
@@ -1879,7 +1944,6 @@ export default function App() {
                           {(activePage === "NIFTY" || activePage === "BANKNIFTY" || activePage === "SENSEX") && (
                             <th className="py-1 px-1.5 text-right text-[9px] font-black uppercase tracking-wider text-indigo-650 dark:text-indigo-400 sticky top-0 z-20 bg-slate-200 dark:bg-[#0e1628] border-b border-slate-300 dark:border-slate-800">VOL x5D</th>
                           )}
-                          <th className="py-1 px-1.5 text-right text-[9px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-400 sticky top-0 z-20 bg-slate-200 dark:bg-[#0e1628] border-b border-slate-300 dark:border-slate-800">LTP</th>
                           <th className="py-1 pr-2 text-right text-[9px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-400 sticky top-0 z-20 bg-slate-200 dark:bg-[#0e1628] border-b border-slate-300 dark:border-slate-800">IMPACT</th>
                         </tr>
                       </thead>
@@ -1968,10 +2032,7 @@ export default function App() {
                                     </td>
                                   );
                                 })()}
-                                <td className={`py-0.5 px-1.5 text-right font-mono font-bold text-[11px] ${
-                                  darkMode ? "text-slate-350" : "text-slate-650"
-                                }`}>{st.ltp.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                                <td className="py-0.5 pr-2 text-right font-mono font-bold text-[11px]">
+                                 <td className="py-0.5 pr-2 text-right font-mono font-bold text-[11px]">
                                   {(() => {
                                     const impactVal = (st.weightage / 100) * st.changePercent;
                                     const impactColor = impactVal > 0 
@@ -2085,84 +2146,131 @@ export default function App() {
                       breakout={aiAnalysis?.breakout}
                     />
                   </ResizableBox>
-                  
-                  {/* Option Summary + Market Layer Analysis — side by side */}
-                  <div className="flex gap-1.5 w-full items-stretch">
-                    <div className="flex-1 flex flex-col gap-1.5 min-w-0">
-                      <ResizableBox id="live-option-summary" editMode={layoutEditMode} className="w-full">
-                        <OptionChainSummary strikes={legacyOptionChain} spotPrice={currentSpot} strikeGap={strikeGap} darkMode={darkMode} />
-                      </ResizableBox>
-                      
-                      <ResizableBox id="live-open-positions-ledger" editMode={layoutEditMode} className="w-full">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 w-full">
-                          <OpenPositionsLedgerCard
-                            forceInstrument="NIFTY"
-                            activePage={activePage}
-                            spotPrice={currentSpot}
-                            dbTrades={dbTrades}
-                            optionChain={legacyOptionChain}
-                            niftyOptionChain={niftyOptionChain?.strikes ?? legacyOptionChain}
-                            onTradeClosed={loadTrades}
-                            darkMode={darkMode}
-                          />
-                          <OpenPositionsLedgerCard
-                            forceInstrument="BANKNIFTY"
-                            activePage={activePage}
-                            spotPrice={currentSpot}
-                            dbTrades={dbTrades}
-                            optionChain={legacyOptionChain}
-                            bankniftyOptionChain={bankniftyOptionChain?.strikes ?? legacyOptionChain}
-                            onTradeClosed={loadTrades}
-                            darkMode={darkMode}
-                          />
-                          <OpenPositionsLedgerCard
-                            forceInstrument="SENSEX"
-                            activePage={activePage}
-                            spotPrice={currentSpot}
-                            dbTrades={dbTrades}
-                            optionChain={legacyOptionChain}
-                            sensexOptionChain={sensexOptionChain?.strikes ?? legacyOptionChain}
-                            onTradeClosed={loadTrades}
-                            darkMode={darkMode}
-                          />
+                  {/* NIFTY/BANKNIFTY/SENSEX Position Cards — Placed ABOVE Institutional Option Summary Deck */}
+                  <ResizableBox id="live-open-positions-ledger" editMode={layoutEditMode} className="w-full flex-shrink-0">
+                    <div className="flex flex-col gap-1.5 w-full">
+                      {/* Control Panel: Toggle & Test Scalp */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-1 mb-0.5">
+                        <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">
+                          {showRealPositions ? "⚡ LIVE REAL TRADES" : "📋 SIMULATED PAPER TRADES"}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {/* Test Scalp Button */}
+                          <button
+                            onClick={handleTestScalp}
+                            disabled={testScalpLoading}
+                            className={`px-2.5 py-1 text-[9px] font-black rounded border transition-all cursor-pointer ${
+                              testScalpLoading
+                                ? "bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed"
+                                : "bg-gradient-to-r from-amber-500/10 to-yellow-500/10 border-amber-500/35 text-amber-400 hover:from-amber-500/20 hover:to-yellow-500/20 shadow-[0_0_12px_rgba(245,158,11,0.06)]"
+                            }`}
+                          >
+                            {testScalpLoading ? "⚡ SCALPING…" : "⚡ TEST SCALP"}
+                          </button>
+                          
+                          {/* Toggle Switch */}
+                          <div className="flex bg-slate-900/90 p-0.5 rounded border border-slate-800/80">
+                            <button
+                              onClick={() => setShowRealPositions(false)}
+                              className={`px-2.5 py-1 text-[9px] font-black rounded transition-all cursor-pointer ${
+                                !showRealPositions
+                                  ? "bg-indigo-600 text-white shadow-sm"
+                                  : "text-slate-500 hover:text-slate-300"
+                              }`}
+                            >
+                              📋 PAPER
+                            </button>
+                            <button
+                              onClick={() => setShowRealPositions(true)}
+                              className={`px-2.5 py-1 text-[9px] font-black rounded transition-all cursor-pointer ${
+                                showRealPositions
+                                  ? "bg-indigo-600 text-white shadow-sm"
+                                  : "text-slate-500 hover:text-slate-300"
+                              }`}
+                            >
+                              ⚡ REAL
+                            </button>
+                          </div>
                         </div>
-                      </ResizableBox>
-                    </div>
+                      </div>
 
-                    {/* Right: Market Layer Analysis Card — spans full height */}
-                    <ResizableBox id="live-market-layer-analysis-side" editMode={layoutEditMode} className="flex-shrink-0 w-[330px] xl:w-[380px]">
-                      <div className="h-full">
-                        <MarketLayerCard
-                          marketDir={
-                            activePage === "NIFTY"
-                              ? niftyMarketDir
-                              : activePage === "BANKNIFTY"
-                              ? bankniftyMarketDir
-                              : activePage === "SENSEX"
-                              ? sensexMarketDir
-                              : null
-                          }
+                      {/* Positions Cards Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 w-full">
+                        <OpenPositionsLedgerCard
+                          forceInstrument="NIFTY"
                           activePage={activePage}
+                          spotPrice={currentSpot}
+                          dbTrades={showRealPositions ? realTrades : dbTrades}
+                          optionChain={legacyOptionChain}
+                          niftyOptionChain={niftyOptionChain?.strikes ?? legacyOptionChain}
+                          onTradeClosed={loadTrades}
                           darkMode={darkMode}
+                          isRealTrade={showRealPositions}
+                        />
+                        <OpenPositionsLedgerCard
+                          forceInstrument="BANKNIFTY"
+                          activePage={activePage}
+                          spotPrice={currentSpot}
+                          dbTrades={showRealPositions ? realTrades : dbTrades}
+                          optionChain={legacyOptionChain}
+                          bankniftyOptionChain={bankniftyOptionChain?.strikes ?? legacyOptionChain}
+                          onTradeClosed={loadTrades}
+                          darkMode={darkMode}
+                          isRealTrade={showRealPositions}
+                        />
+                        <OpenPositionsLedgerCard
+                          forceInstrument="SENSEX"
+                          activePage={activePage}
+                          spotPrice={currentSpot}
+                          dbTrades={showRealPositions ? realTrades : dbTrades}
+                          optionChain={legacyOptionChain}
+                          sensexOptionChain={sensexOptionChain?.strikes ?? legacyOptionChain}
+                          onTradeClosed={loadTrades}
+                          darkMode={darkMode}
+                          isRealTrade={showRealPositions}
                         />
                       </div>
-                    </ResizableBox>
-                  </div>
-                </div>
-
-                {/* Right Side: Tall Sector Heavyweight monitoring panel */}
-                <div className="w-full lg:w-[210px] xl:w-[220px] flex-shrink-0 flex flex-col gap-1.5 min-h-0">
-                  <ResizableBox id="live-heavyweights-side" editMode={layoutEditMode} className="flex-shrink-0 h-auto">
-                    <SectorHeavyweights stocks={currentStocksOnly} darkMode={darkMode} activePage={activePage} />
+                    </div>
                   </ResizableBox>
 
-                  <ResizableBox id="live-index-chart" editMode={layoutEditMode} className="flex-1 min-h-[200px]">
-                    <MiniChartWidget
-                      instrument={activePage}
-                      livePrice={currentSpot}
-                      socket={socket}
+                  <ResizableBox id="live-option-summary" editMode={layoutEditMode} className="w-full">
+                    <OptionChainSummary strikes={legacyOptionChain} spotPrice={currentSpot} strikeGap={strikeGap} darkMode={darkMode} />
+                  </ResizableBox>
+                </div>
+
+                {/* Right Side: Live Preview Chart & Heavyweights on Top, Market Layer Analysis RIGHT BELOW (NICHE) */}
+                <div className="w-full lg:w-[480px] xl:w-[540px] flex-shrink-0 flex flex-col gap-1.5 min-h-0">
+                  {/* Top Row: Heavyweights on LEFT, Live Preview Chart on RIGHT — EQUAL HEIGHT */}
+                  <div className="w-full flex flex-row gap-1.5 items-stretch min-h-[250px]">
+                    <ResizableBox id="live-heavyweights-side" editMode={layoutEditMode} className="w-[170px] xl:w-[180px] flex-shrink-0 h-full">
+                      <SectorHeavyweights stocks={currentStocksOnly} darkMode={darkMode} activePage={activePage} />
+                    </ResizableBox>
+
+                    <ResizableBox id="live-index-chart" editMode={layoutEditMode} className="flex-1 h-full min-h-[240px] min-w-[220px]">
+                      <MiniChartWidget
+                        instrument={activePage}
+                        livePrice={currentSpot}
+                        socket={socket}
+                        darkMode={darkMode}
+                        heightClass="h-full"
+                      />
+                    </ResizableBox>
+                  </div>
+
+                  {/* Market Layer Analysis Card — Shifted NICHE (Below Live Preview & Heavyweight Card) */}
+                  <ResizableBox id="live-market-layer-analysis-side" editMode={layoutEditMode} className="w-full">
+                    <MarketLayerCard
+                      marketDir={
+                        activePage === "NIFTY"
+                          ? niftyMarketDir
+                          : activePage === "BANKNIFTY"
+                          ? bankniftyMarketDir
+                          : activePage === "SENSEX"
+                          ? sensexMarketDir
+                          : null
+                      }
+                      activePage={activePage}
                       darkMode={darkMode}
-                      heightClass="h-full"
                     />
                   </ResizableBox>
                 </div>
@@ -2650,6 +2758,60 @@ export default function App() {
             <StockAnalysis />
           </div>
         )}
+
+        {/* REAL TRADE TAB */}
+        {activeTab === "REAL_TRADE" && (
+          <RealTradeTab
+            darkMode={true}
+            fyersAuthorized={fyersAuthorized}
+          />
+        )}
+
+        {/* TRADE JOURNAL TAB */}
+        {activeTab === "JOURNAL" && (
+          <TradeJournal
+            darkMode={darkMode}
+            socket={socket}
+          />
+        )}
+
+        {/* SWING TRADE SYSTEM TAB */}
+        {activeTab === "SWING" && (
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <SwingTradeSystem
+              darkMode={darkMode}
+              niftyStocks={niftyStocks}
+              bankniftyStocks={bankniftyStocks}
+              sensexStocks={sensexStocks}
+              niftySpot={niftySpot}
+              bankniftySpot={bankniftySpot}
+              sensexSpot={sensexSpot}
+              niftyHistory={niftyHistory || { high: 0, low: 0, prevClose: 0 }}
+              bankniftyHistory={bankniftyHistory || { high: 0, low: 0, prevClose: 0 }}
+              sensexHistory={sensexHistory || { high: 0, low: 0, prevClose: 0 }}
+              pcr={pcr}
+              serverTime={serverTime}
+              relianceOptionChain={relianceOptionChain}
+              hdfcbankOptionChain={hdfcbankOptionChain}
+              icicibankOptionChain={icicibankOptionChain}
+              customStockOptionChain={customStockOptionChain}
+              customStockSymbol={customStockSymbol}
+            />
+          </div>
+        )}
+
+        {/* JARVIS AI MICRO-SCALPER TAB */}
+        {activeTab === "JARVIS" && (
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <JarvisTradingEngine
+              niftySpot={niftySpot}
+              sensexSpot={sensexSpot}
+              bankniftySpot={bankniftySpot}
+              fyersAuthorized={fyersAuthorized}
+              connectionStatus={connectionStatus}
+            />
+          </div>
+        )}
       </main>
 
       {/* Global animated fullscreen popup overlay for triggered alerts */}
@@ -2800,6 +2962,45 @@ export default function App() {
                 }`}>
               <BarChart2 size={13} className="text-teal-400 animate-pulse" />
               <span>STOCK ANALYSIS (NSE)</span>
+            </button>
+            {/* REAL TRADE tab */}
+            <button onClick={() => setActiveTab("REAL_TRADE")}
+              className={`px-4 py-1.5 text-xs font-semibold border-t flex items-center gap-1.5 cursor-pointer relative top-[-1px] ${activeTab === "REAL_TRADE"
+                  ? "bg-[#06001a] text-green-400 font-black border-t-2 border-t-green-500 shadow border-r border-r-slate-800"
+                  : "bg-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                }`}>
+              <TrendingUp size={13} className={`text-green-500 ${fyersAuthorized ? 'animate-pulse' : ''}`} />
+              <span>REAL TRADE</span>
+              {/* Badge for pending approvals */}
+              <span id="real-trade-badge" style={{ display: 'none' }} className="bg-amber-500 text-black text-[9px] font-black px-1.5 py-0.5 rounded-full ml-1">!</span>
+            </button>
+            {/* TRADE JOURNAL tab */}
+            <button onClick={() => setActiveTab("JOURNAL")}
+              className={`px-4 py-1.5 text-xs font-semibold border-t flex items-center gap-1.5 cursor-pointer relative top-[-1px] ${activeTab === "JOURNAL"
+                  ? "bg-[#0d0a2a] text-violet-400 font-black border-t-2 border-t-violet-500 shadow border-r border-r-slate-800"
+                  : "bg-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                }`}>
+              <BookOpen size={13} className="text-violet-400" />
+              <span>JOURNAL</span>
+            </button>
+            {/* SWING TRADE tab */}
+            <button onClick={() => setActiveTab("SWING")}
+              className={`px-4 py-1.5 text-xs font-semibold border-t flex items-center gap-1.5 cursor-pointer relative top-[-1px] ${activeTab === "SWING"
+                  ? "bg-[#0a0620] text-fuchsia-400 font-black border-t-2 border-t-fuchsia-500 shadow border-r border-r-slate-800"
+                  : "bg-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                }`}>
+              <TrendingUp size={13} className="text-fuchsia-400" />
+              <span>SWING TRADE</span>
+            </button>
+            {/* JARVIS AI MICRO-SCALPER tab */}
+            <button onClick={() => setActiveTab("JARVIS")}
+              className={`px-4 py-1.5 text-xs font-semibold border-t flex items-center gap-1.5 cursor-pointer relative top-[-1px] ${activeTab === "JARVIS"
+                  ? "bg-[#041426] text-cyan-400 font-black border-t-2 border-t-cyan-500 shadow border-r border-r-slate-800"
+                  : "bg-transparent text-cyan-500/70 hover:text-cyan-300 hover:bg-cyan-950/30"
+                }`}>
+              <Cpu size={13} className="text-cyan-400 animate-pulse" />
+              <span className="font-bold tracking-wide">⚡ JARVIS AI</span>
+              <span className="bg-cyan-500 text-black text-[8px] font-black px-1.5 py-0.2 rounded-full ml-1 animate-pulse">L6</span>
             </button>
           </div>
         </div>

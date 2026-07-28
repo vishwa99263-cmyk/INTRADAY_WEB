@@ -8,7 +8,8 @@ import { Server as SocketIOServer } from "socket.io";
 import { marketState } from "../state/marketState.js";
 import { getISTTime } from "../utils/timerUtils.js";
 import { savePaperTrade, closePaperTrade, getLotSize } from "./tradingEngineDB.js";
-import { executeFyersOrder } from "./fyersOrderBridge.js";
+import { executeFyersOrder, getFyersAutoTradeState } from "./fyersOrderBridge.js";
+import { addApprovalRequest } from "./pendingTradeApprovalQueue.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -246,8 +247,8 @@ async function processTick(): Promise<void> {
             // 1. Close local paper trade
             closePaperTrade(idxState.activeTradeId, optionLtp, totalPnL);
 
-            // 2. Dispatch webhook to Fyers Automate if real trading is toggled
-            if (engineState.isRealMode) {
+            // 2. Dispatch webhook to Fyers Automate if FYERS AUTO switch for this index is ON
+            if (getFyersAutoTradeState(indexName)) {
               await executeFyersOrder(
                 {
                   id: idxState.activeTradeId,
@@ -341,19 +342,26 @@ async function processTick(): Promise<void> {
 
             savePaperTrade(paperTrade);
 
-            // 2. Dispatch real order to Fyers Automate if enabled
-            if (engineState.isRealMode) {
-              await executeFyersOrder(
-                {
-                  id: tradeId,
-                  instrument: indexName,
-                  direction: triggerDirection,
-                  strike: atmStrike,
-                  qty: qty * lotSize,
-                  entry_price: optionLtp,
-                },
-                "ENTRY"
-              );
+            // 2. Route ENTRY to Approval Queue (same as main auto-trading — user must approve).
+            //    EXIT orders are always direct (no approval needed to close).
+            if (getFyersAutoTradeState(indexName)) {
+              const approval = addApprovalRequest({
+                paperId: tradeId,
+                instrument: indexName,
+                direction: triggerDirection as "BUY_CE" | "BUY_PE",
+                strike: atmStrike,
+                qty: qty * lotSize,
+                entry_price: optionLtp,
+                target: optionLtp + engineState.targetPoints,
+                stop_loss: optionLtp - engineState.slPoints,
+                contractSymbol: optionSymbol,
+                strategyName: "ORB_NAKED",
+                confidence: 75,
+                signalGrade: "B",
+              });
+              // Emit to all connected clients
+              _io?.emit("pending-trade-approval", approval);
+              console.log(`[ORBEngine] 🔔 Approval notification sent for ORB trade ${tradeId}`);
             }
 
             // 3. Update engine index state

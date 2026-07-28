@@ -104,6 +104,7 @@ export interface MarketStateType {
   fyersAuthorized:  boolean;
   alerts:           AlertRule[];
   triggeredAlerts:  TriggeredAlert[];
+  io?:              any;
 }
 
 const initialOptionChain = (): OptionChainState => ({
@@ -155,8 +156,8 @@ export const marketState: MarketStateType = {
   connectionStatus: "DISCONNECTED",
   isSimulating:     true,
   fyersConfig: {
-    app_id:       "R8T7ETPIPG-100",
-    secret_key:   "I83VB7I7VP",
+    app_id:       "H29I4RZ5R6-200",
+    secret_key:   "PSSCRk2RaK",
     redirect_uri: "http://127.0.0.1:3000",
     access_token: "",
   },
@@ -164,4 +165,5 @@ export const marketState: MarketStateType = {
   fyersAuthorized: false,
   alerts:          [],
   triggeredAlerts: [],
+  io:              undefined,
 };

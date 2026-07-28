@@ -18,7 +18,7 @@
  *  - Strategy-specific risk params used in scoring
  */
 
-import { getStrategies, type Strategy } from "./strategyStore.js";
+import { STRATEGY_REGISTRY, type StrategyDefinition } from "../../src/engine/strategyRegistry.js";
 import type { AntigravityDecision } from "./antigravityEngine.js";
 import type { StrategyAlignment } from "./strategyAlignmentEngine.js";
 import type { CompleteMarketReport } from "../utils/marketAnalysis.js";
@@ -440,7 +440,7 @@ const STRATEGY_PRIORITIES: Record<string, number> = {
 };
 
 interface StrategyScore {
-  strategy: Strategy;
+  strategy: StrategyDefinition;
   score: number;
   conditionsMet: string[];
   conditionsNotMet: string[];
@@ -449,8 +449,8 @@ interface StrategyScore {
 }
 
 // ── IQ200+: Extract structured tags from strategy text fields ──────────────
-function extractTags(strat: Strategy): string[] {
-  const combined = [strat.name, strat.objective, strat.entryRules].join(" ").toLowerCase();
+function extractTags(strat: StrategyDefinition): string[] {
+  const combined = [strat.name, strat.description, strat.entryTrigger || ""].join(" ").toLowerCase();
   const tags: string[] = [];
   if (combined.includes("ema")) tags.push("ema");
   if (combined.includes("macd")) tags.push("macd");
@@ -468,8 +468,8 @@ function extractTags(strat: Strategy): string[] {
 }
 
 // ── IQ200+: Derive session list from strategy text ─────────────────────────
-function extractSessions(strat: Strategy): string[] {
-  const combined = [strat.name, strat.entryRules, strat.objective].join(" ").toLowerCase();
+function extractSessions(strat: StrategyDefinition): string[] {
+  const combined = [strat.name, strat.entryTrigger || "", strat.description].join(" ").toLowerCase();
   const sessions: string[] = [];
   if (combined.includes("opening") || combined.includes("9:15") || combined.includes("9:30") || combined.includes("orb")) {
     sessions.push("OPENING");
@@ -485,8 +485,8 @@ function extractSessions(strat: Strategy): string[] {
 }
 
 // ── IQ200+: Derive allowed regimes from strategy text ─────────────────────
-function extractRegimes(strat: Strategy): string[] {
-  const combined = [strat.name, strat.objective, strat.marketLogic, strat.bestConditions].join(" ").toLowerCase();
+function extractRegimes(strat: StrategyDefinition): string[] {
+  const combined = [strat.name, strat.description, strat.entryTrigger || "", strat.fullDescription || ""].join(" ").toLowerCase();
   const regimes: string[] = [];
   if (combined.includes("bullish") || combined.includes("uptrend") || combined.includes("breakout")) {
     regimes.push("TRENDING_BULL", "BREAKOUT");
@@ -503,7 +503,7 @@ function extractRegimes(strat: Strategy): string[] {
 
 // ── IQ200+: Full strategy scorer (condition-based + text-bonus) ────────────
 function scoreStrategy(
-  strat: Strategy,
+  strat: StrategyDefinition,
   direction: "BUY_CE" | "BUY_PE",
   timeSlot: TimeSlot,
   regime: string,
@@ -540,10 +540,11 @@ function scoreStrategy(
 
   // VIX range from strategy description
   let vixMin = 0, vixMax = 30;
-  if (strat.bestConditions?.toLowerCase().includes("low vix") || strat.bestConditions?.toLowerCase().includes("calm")) {
+  const desc = ((strat.description || "") + " " + (strat.fullDescription || "")).toLowerCase();
+  if (desc.includes("low vix") || desc.includes("calm")) {
     vixMax = 15;
   }
-  if (strat.bestConditions?.toLowerCase().includes("high vix") || strat.bestConditions?.toLowerCase().includes("volatile")) {
+  if (desc.includes("high vix") || desc.includes("volatile")) {
     vixMin = 16;
     vixMax = 40;
   }
@@ -634,7 +635,7 @@ export function dispatchStrategy(
   // ── Detect scalp type for built-in fallback ──────────────────────────────
   const scalpInfo = detectScalpType(direction, timeSlot, regime, vix, isExpiryDayFlag, breakout, momentum, report, confidence);
 
-  const strategies = getStrategies();
+  const strategies = STRATEGY_REGISTRY;
   if (!strategies || strategies.length === 0) {
     const builtinName = deriveBuiltinName(direction, timeSlot, report, breakout, momentum, scalpInfo.scalpType);
     return {

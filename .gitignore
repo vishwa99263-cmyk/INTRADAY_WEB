@@ -9,9 +9,12 @@ coverage/
 
 # Live Data & Backup folders
 *.db
-server/storage/
+server/storage/postgres_backup.sql
+server/storage/*.json
+server/storage/chart-cache/
 scratch/
 .wwebjs_auth/
 __pycache__/
 "C:\\Users\\gt\\OneDrive\\Score Backup store data/"
 fyers_config.json
+token.txt
